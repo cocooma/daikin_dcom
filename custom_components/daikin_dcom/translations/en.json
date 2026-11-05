@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Daikin Altherma 3 (DCOM-LT/MB)",
+        "description": "Connect to the DCOM-LT/MB through a Modbus TCP gateway. Use 'RTU over TCP' for transparent RS485 gateways.",
+        "data": {
+          "host": "Gateway host / IP",
+          "port": "Port",
+          "slave": "Modbus address (DIP switches SW1.3-SW1.8)",
+          "framing": "Framing",
+          "control_mode": "Temperature control"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not read from the DCOM-LT/MB. Check host, port, address and framing."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "control_mode": "Temperature control",
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "framing": {
+      "options": {
+        "tcp": "Modbus TCP",
+        "rtu": "RTU over TCP"
+      }
+    },
+    "control_mode": {
+      "options": {
+        "lwt": "Leaving water temperature (registers 1/2)",
+        "room": "Room thermostat (registers 6/7)"
+      }
+    }
+  }
+}

@@ -26,6 +26,7 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.NUMBER,
     Platform.TIME,
+    Platform.IMAGE,
 ]
 
 

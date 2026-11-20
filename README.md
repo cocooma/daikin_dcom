@@ -128,33 +128,6 @@ series:
 Adjust the entity id if yours differs. "Now" is the averaged outdoor temperature and the target written
 to the unit, including any room correction.
 
-## COP metrics
-
-The DCOM has no power or energy registers, so heat is calculated from the water side and electricity comes
-from your own meter (integration options: **heat pump energy meter** in kWh, preferred, or **power sensor** in
-W/kW). Without a meter only the thermal sensors are created.
-
-* Thermal power = flow (input 49) × 4.186 × ΔT. Heating / DHW: LWT − return; cooling: return − LWT.
-  LWT is input 41 (pre BUH), falling back to input 40. Defrost gives negative values, which correctly
-  reduces the heat counted. Heat from the DHW tank booster heater is not measured.
-* Electricity is assigned to the mode the unit is in (3-way valve on DHW → DHW, operation mode cooling →
-  cooling, otherwise heating), standby included.
-* Gaps longer than 5 min (restart, outage) are skipped. Counters are restored after a restart; "today" resets
-  at local midnight.
-
-| Entity | Meaning |
-|---|---|
-| Thermal power | kW delivered (heating/DHW) or extracted (cooling); attribute `mode` |
-| Heating / Cooling / DHW thermal energy | lifetime kWh |
-| Heat pump electrical power | kW from the meter |
-| Heating / Cooling / DHW electrical energy | lifetime kWh |
-| COP (15 min) | rolling COP for the current mode |
-| Heating / Cooling / DHW COP today | attributes: today's thermal and electrical kWh |
-| Heating / Cooling / DHW COP (lifetime) | since the counters started |
-
-The energy sensors can be added to the HA Energy dashboard or a `utility_meter` for monthly figures.
-Accuracy depends on the flow and temperature sensors: at a 3 °C ΔT, a 0.3 °C error is about 10 %.
-
 ## Notes
 
 * Register numbers are used as Modbus addresses directly (manual: "Register Base 0").

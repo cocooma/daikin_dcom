@@ -37,8 +37,6 @@ from .const import (
     CONF_SMART_WARM_LWT,
     CONF_SMART_WARM_OUT,
     SMART_DEFAULTS,
-    CONF_COP_ENERGY_SENSOR,
-    CONF_COP_POWER_SENSOR,
 )
 from .modbus_client import DcomClient, DcomError
 
@@ -142,8 +140,6 @@ class DcomOptionsFlow(OptionsFlow):
                 errors[CONF_SMART_OFF_TEMP] = "off_below_mild"
             else:
                 user_input.setdefault(CONF_SMART_ROOM_SENSOR, "")
-                user_input.setdefault(CONF_COP_ENERGY_SENSOR, "")
-                user_input.setdefault(CONF_COP_POWER_SENSOR, "")
                 return self.async_create_entry(data=user_input)
 
         entry = self.config_entry
@@ -196,25 +192,6 @@ class DcomOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SMART_ROOM_MAX_OFFSET, default=opts[CONF_SMART_ROOM_MAX_OFFSET]
                 ): vol.All(int, vol.Range(min=0, max=5)),
-                # --- COP metrics ---
-                vol.Optional(
-                    CONF_COP_ENERGY_SENSOR,
-                    description={
-                        "suggested_value": entry.options.get(CONF_COP_ENERGY_SENSOR)
-                        or None
-                    },
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor", device_class="energy")
-                ),
-                vol.Optional(
-                    CONF_COP_POWER_SENSOR,
-                    description={
-                        "suggested_value": entry.options.get(CONF_COP_POWER_SENSOR)
-                        or None
-                    },
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor", device_class="power")
-                ),
             }
         )
         return self.async_show_form(

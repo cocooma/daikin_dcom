@@ -93,40 +93,20 @@ Entities: **Smart heating control** (switch, state restored after restart), the 
 
 ### Heating curve on a dashboard
 
-The **Smart heating target LWT** sensor has a `curve_points` attribute (`[outdoor, LWT]` pairs from −15 to
-+20 °C, not stored in the recorder). With [apexcharts-card](https://github.com/RomRider/apexcharts-card)
-(HACS) the curve and the current operating point can be shown like this:
+The integration draws the curve itself: the **Heating curve** image entity is an SVG showing the curve,
+its two points, the mild-day window and "off" zones, and the current operating point (averaged outdoor
+temperature → setpoint written to the unit, with any room correction). It is redrawn when any of these
+change. No custom card is needed; use the built-in Picture entity card:
 
 ```yaml
-type: custom:apexcharts-card
-header:
-  show: true
-  title: Heating curve
-apex_config:
-  xaxis:
-    type: numeric
-    title: { text: Outdoor °C }
-  yaxis:
-    - min: 24
-      max: 40
-      title: { text: Leaving water °C }
-  markers:
-    size: [0, 7]
-series:
-  - entity: sensor.daikin_altherma_3_smart_heating_target_lwt
-    name: Curve
-    type: line
-    data_generator: |
-      return entity.attributes.curve_points;
-  - entity: sensor.daikin_altherma_3_smart_heating_target_lwt
-    name: Now
-    type: scatter
-    data_generator: |
-      return [[entity.attributes.outdoor_average, Number(entity.state)]];
+type: picture-entity
+entity: image.daikin_altherma_3_heating_curve
+show_name: false
+show_state: false
 ```
 
-Adjust the entity id if yours differs. "Now" is the averaged outdoor temperature and the target written
-to the unit, including any room correction.
+The **Smart heating target LWT** sensor also has a `curve_points` attribute (`[outdoor, LWT]` pairs from
+−15 to +20 °C, not recorded) if you want to plot the curve with another card.
 
 ## Notes
 

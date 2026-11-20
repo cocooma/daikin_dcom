@@ -41,6 +41,8 @@ class DcomCoordinator(DataUpdateCoordinator[dict[str, dict[int, int]]]):
         self.control_mode: str = entry.options.get(
             CONF_CONTROL_MODE, entry.data.get(CONF_CONTROL_MODE, DEFAULT_CONTROL_MODE)
         )
+        self.smart = None  # SmartHeatingController, set in __init__.py
+        self.cop = None  # CopTracker, set in __init__.py
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name="Daikin Altherma 3",

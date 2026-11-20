@@ -29,6 +29,9 @@ from .const import (
     H_ROOM_COOL_SP,
     H_ROOM_HEAT_SP,
     H_SPACE_ONOFF,
+    H_WEATHER_COOL_OFFSET,
+    H_WEATHER_HEAT_OFFSET,
+    H_WEATHER_MODE,
     I_BOOSTER_HEATER,
     I_COMPRESSOR,
     I_DEFROST,
@@ -38,6 +41,8 @@ from .const import (
     I_ROOM_TEMP,
     I_THREE_WAY_VALVE,
     RANGES,
+    WEATHER_DEPENDENT_MODES,
+    WEATHER_OFFSET_RANGE,
 )
 from .coordinator import DcomCoordinator
 from .entity import DcomEntity
@@ -63,6 +68,12 @@ class DcomSpaceClimate(DcomEntity, ClimateEntity):
     The target temperature written is the heating or cooling setpoint that is
     currently active (LWT regs 1/2 or room thermostat regs 6/7, selectable
     in the integration options).
+
+    In LWT control with weather dependent mode active (reg 53 = 1 or 3) the
+    fixed LWT setpoints are not used by the unit and the DCOM exposes no
+    register for the curve-calculated setpoint. The target temperature then
+    is the weather dependent setpoint offset (regs 54/55, -10..10 degC), like
+    the shift shown on the Daikin user interface.
     """
 
     _attr_name = "Space heating/cooling"
@@ -102,6 +113,22 @@ class DcomSpaceClimate(DcomEntity, ClimateEntity):
         return self.coordinator.value("i", I_OPERATION_MODE) == 2  # auto
 
     @property
+    def _weather_dependent(self) -> bool:
+        """True if the target is the weather dependent offset."""
+        c = self.coordinator
+        return (
+            c.control_mode == CONTROL_LWT
+            and c.value("h", H_WEATHER_MODE) in WEATHER_DEPENDENT_MODES
+        )
+
+    @property
+    def _target_reg(self) -> int:
+        cooling = self._cooling_active
+        if self._weather_dependent:
+            return H_WEATHER_COOL_OFFSET if cooling else H_WEATHER_HEAT_OFFSET
+        return self._cool_reg if cooling else self._heat_reg
+
+    @property
     def hvac_mode(self) -> HVACMode | None:
         c = self.coordinator
         if c.value("h", H_SPACE_ONOFF) == 0:
@@ -134,16 +161,21 @@ class DcomSpaceClimate(DcomEntity, ClimateEntity):
 
     @property
     def target_temperature(self) -> float | None:
-        reg = self._cool_reg if self._cooling_active else self._heat_reg
-        return self.coordinator.value("h", reg)
+        return self.coordinator.value("h", self._target_reg)
+
+    @property
+    def _range(self) -> tuple[int, int]:
+        if self._weather_dependent:
+            return WEATHER_OFFSET_RANGE
+        return self._ranges["cool" if self._cooling_active else "heat"]
 
     @property
     def min_temp(self) -> float:
-        return self._ranges["cool" if self._cooling_active else "heat"][0]
+        return self._range[0]
 
     @property
     def max_temp(self) -> float:
-        return self._ranges["cool" if self._cooling_active else "heat"][1]
+        return self._range[1]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -152,8 +184,11 @@ class DcomSpaceClimate(DcomEntity, ClimateEntity):
         return {
             "active_operation": {1: "heating", 2: "cooling"}.get(op),
             "control_mode": c.control_mode,
+            "weather_dependent": self._weather_dependent,
             "heating_setpoint": c.value("h", self._heat_reg),
             "cooling_setpoint": c.value("h", self._cool_reg),
+            "heating_weather_offset": c.value("h", H_WEATHER_HEAT_OFFSET),
+            "cooling_weather_offset": c.value("h", H_WEATHER_COOL_OFFSET),
         }
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
@@ -168,8 +203,8 @@ class DcomSpaceClimate(DcomEntity, ClimateEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         if (temp := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
-        reg = self._cool_reg if self._cooling_active else self._heat_reg
-        await self.coordinator.async_write(reg, int(round(temp)))
+        # negative offsets are written as two's complement by the coordinator
+        await self.coordinator.async_write(self._target_reg, int(round(temp)))
 
 
 class DcomDhwClimate(DcomEntity, ClimateEntity):

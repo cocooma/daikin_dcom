@@ -36,9 +36,7 @@
           "smart_off_temp": "Smart heating: no space heating above",
           "smart_room_sensor": "Smart heating: room temperature sensor (optional)",
           "smart_room_target": "Smart heating: room target temperature",
-          "smart_room_max_offset": "Smart heating: maximum room correction (°C)",
-          "cop_energy_sensor": "COP: heat pump energy meter (kWh, preferred)",
-          "cop_power_sensor": "COP: heat pump power sensor (W/kW, if no energy meter)"
+          "smart_room_max_offset": "Smart heating: maximum room correction (°C)"
         },
         "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The mild-day time window is set with the 'Smart heating window start/end' entities and the 'Smart heating mild-day window' switch."
       }

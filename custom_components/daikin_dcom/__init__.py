@@ -16,6 +16,8 @@ from .const import (
 )
 from .coordinator import DcomCoordinator
 from .modbus_client import DcomClient
+from .cop import CopTracker
+from .smart import SmartHeatingController
 
 PLATFORMS = [
     Platform.CLIMATE,
@@ -24,6 +26,7 @@ PLATFORMS = [
     Platform.SWITCH,
     Platform.SELECT,
     Platform.NUMBER,
+    Platform.TIME,
 ]
 
 
@@ -41,6 +44,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await client.close()
         raise ConfigEntryNotReady(str(err)) from err
 
+    coordinator.smart = SmartHeatingController(hass, entry, coordinator)
+    coordinator.smart.start()
+    coordinator.cop = CopTracker(hass, entry.options, coordinator)
+    coordinator.cop.start()
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
@@ -54,5 +62,7 @@ async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         coordinator: DcomCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator.smart.stop()
+        coordinator.cop.stop()
         await coordinator.client.close()
     return unload_ok

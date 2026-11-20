@@ -26,9 +26,26 @@
         "title": "Options",
         "data": {
           "control_mode": "Temperature control",
-          "scan_interval": "Polling interval (seconds)"
-        }
+          "scan_interval": "Polling interval (seconds)",
+          "smart_cold_outdoor": "Smart heating: cold point outdoor temperature",
+          "smart_cold_lwt": "Smart heating: leaving water at the cold point",
+          "smart_warm_outdoor": "Smart heating: warm point outdoor temperature",
+          "smart_warm_lwt": "Smart heating: leaving water at the warm point (min 25)",
+          "smart_max_lwt": "Smart heating: maximum leaving water",
+          "smart_mild_temp": "Smart heating: mild day above (heat only inside the window)",
+          "smart_off_temp": "Smart heating: no space heating above",
+          "smart_room_sensor": "Smart heating: room temperature sensor (optional)",
+          "smart_room_target": "Smart heating: room target temperature",
+          "smart_room_max_offset": "Smart heating: maximum room correction (°C)",
+          "cop_energy_sensor": "COP: heat pump energy meter (kWh, preferred)",
+          "cop_power_sensor": "COP: heat pump power sensor (W/kW, if no energy meter)"
+        },
+        "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The mild-day time window is set with the 'Smart heating window start/end' entities and the 'Smart heating mild-day window' switch."
       }
+    },
+    "error": {
+      "warm_below_cold": "The warm point must be warmer than the cold point.",
+      "off_below_mild": "'No space heating above' must not be lower than the mild-day temperature."
     }
   },
   "selector": {
@@ -42,6 +59,22 @@
       "options": {
         "lwt": "Leaving water temperature (registers 1/2)",
         "room": "Room thermostat (registers 6/7)"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "smart_status": {
+        "state": {
+          "disabled": "Disabled",
+          "waiting_for_data": "Waiting for data",
+          "cooling_mode": "Cooling mode (not controlled)",
+          "space_heating_off": "Space heating off (by user)",
+          "defrost": "Defrost",
+          "heating": "Heating",
+          "paused_warm": "Paused (warm)",
+          "paused_mild_outside_window": "Paused (mild, outside window)"
+        }
       }
     }
   }

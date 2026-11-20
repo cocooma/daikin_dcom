@@ -26,8 +26,33 @@ from .const import (
     FRAMING_RTU,
     FRAMING_TCP,
     I_UNIT_ERROR,
+    CONF_SMART_COLD_LWT,
+    CONF_SMART_COLD_OUT,
+    CONF_SMART_MAX_LWT,
+    CONF_SMART_MILD_TEMP,
+    CONF_SMART_OFF_TEMP,
+    CONF_SMART_ROOM_MAX_OFFSET,
+    CONF_SMART_ROOM_SENSOR,
+    CONF_SMART_ROOM_TARGET,
+    CONF_SMART_WARM_LWT,
+    CONF_SMART_WARM_OUT,
+    SMART_DEFAULTS,
+    CONF_COP_ENERGY_SENSOR,
+    CONF_COP_POWER_SENSOR,
 )
 from .modbus_client import DcomClient, DcomError
+
+
+def _num(lo: float, hi: float, step: float, unit: str = "°C") -> selector.NumberSelector:
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=lo,
+            max=hi,
+            step=step,
+            unit_of_measurement=unit,
+            mode=selector.NumberSelectorMode.BOX,
+        )
+    )
 
 
 def _select(options: list[str], key: str) -> selector.SelectSelector:
@@ -104,15 +129,25 @@ class DcomConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DcomOptionsFlow(OptionsFlow):
-    """Options: control mode and polling interval."""
+    """Options: control mode, polling interval and smart heating settings."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            if user_input[CONF_SMART_WARM_OUT] <= user_input[CONF_SMART_COLD_OUT]:
+                errors[CONF_SMART_WARM_OUT] = "warm_below_cold"
+            elif user_input[CONF_SMART_OFF_TEMP] < user_input[CONF_SMART_MILD_TEMP]:
+                errors[CONF_SMART_OFF_TEMP] = "off_below_mild"
+            else:
+                user_input.setdefault(CONF_SMART_ROOM_SENSOR, "")
+                user_input.setdefault(CONF_COP_ENERGY_SENSOR, "")
+                user_input.setdefault(CONF_COP_POWER_SENSOR, "")
+                return self.async_create_entry(data=user_input)
 
         entry = self.config_entry
+        opts = {**SMART_DEFAULTS, **entry.options, **(user_input or {})}
         current_mode = entry.options.get(
             CONF_CONTROL_MODE, entry.data.get(CONF_CONTROL_MODE, DEFAULT_CONTROL_MODE)
         )
@@ -125,6 +160,63 @@ class DcomOptionsFlow(OptionsFlow):
                 vol.Required(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
                     int, vol.Range(min=10, max=600)
                 ),
+                # --- smart heating control ---
+                vol.Required(
+                    CONF_SMART_COLD_OUT, default=opts[CONF_SMART_COLD_OUT]
+                ): _num(-25, 10, 0.5),
+                vol.Required(
+                    CONF_SMART_COLD_LWT, default=opts[CONF_SMART_COLD_LWT]
+                ): _num(25, 55, 0.5),
+                vol.Required(
+                    CONF_SMART_WARM_OUT, default=opts[CONF_SMART_WARM_OUT]
+                ): _num(0, 25, 0.5),
+                vol.Required(
+                    CONF_SMART_WARM_LWT, default=opts[CONF_SMART_WARM_LWT]
+                ): _num(25, 55, 0.5),
+                vol.Required(
+                    CONF_SMART_MAX_LWT, default=opts[CONF_SMART_MAX_LWT]
+                ): _num(25, 55, 1),
+                vol.Required(
+                    CONF_SMART_MILD_TEMP, default=opts[CONF_SMART_MILD_TEMP]
+                ): _num(0, 25, 0.5),
+                vol.Required(
+                    CONF_SMART_OFF_TEMP, default=opts[CONF_SMART_OFF_TEMP]
+                ): _num(5, 30, 0.5),
+                vol.Optional(
+                    CONF_SMART_ROOM_SENSOR,
+                    description={"suggested_value": opts[CONF_SMART_ROOM_SENSOR] or None},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor", device_class="temperature"
+                    )
+                ),
+                vol.Required(
+                    CONF_SMART_ROOM_TARGET, default=opts[CONF_SMART_ROOM_TARGET]
+                ): _num(15, 28, 0.5),
+                vol.Required(
+                    CONF_SMART_ROOM_MAX_OFFSET, default=opts[CONF_SMART_ROOM_MAX_OFFSET]
+                ): vol.All(int, vol.Range(min=0, max=5)),
+                # --- COP metrics ---
+                vol.Optional(
+                    CONF_COP_ENERGY_SENSOR,
+                    description={
+                        "suggested_value": entry.options.get(CONF_COP_ENERGY_SENSOR)
+                        or None
+                    },
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="energy")
+                ),
+                vol.Optional(
+                    CONF_COP_POWER_SENSOR,
+                    description={
+                        "suggested_value": entry.options.get(CONF_COP_POWER_SENSOR)
+                        or None
+                    },
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="power")
+                ),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init", data_schema=schema, errors=errors
+        )

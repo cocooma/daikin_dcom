@@ -126,7 +126,3 @@ SMART_DEFAULTS = {
     CONF_SMART_ROOM_TARGET: 22.0,
     CONF_SMART_ROOM_MAX_OFFSET: 3,
 }
-
-# --- COP metrics -------------------------------------------------------------
-CONF_COP_ENERGY_SENSOR = "cop_energy_sensor"  # kWh meter of the heat pump (preferred)
-CONF_COP_POWER_SENSOR = "cop_power_sensor"  # W / kW, used if no energy sensor

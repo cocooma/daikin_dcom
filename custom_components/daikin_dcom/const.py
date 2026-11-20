@@ -88,9 +88,45 @@ RANGES = {
 }
 DHW_RANGE = (30, 60)
 
+WEATHER_DEPENDENT_MODES = (1, 3)  # reg 53 values using the curve
+WEATHER_OFFSET_RANGE = (-10, 10)  # regs 54 / 55
+
 WEATHER_MODES = {
     0: "fixed",
     1: "weather_dependent",
     2: "fixed_scheduled",
     3: "weather_dependent_scheduled",
 }
+
+# --- Smart heating control (HA-side curve + mild-day scheduling) ------------
+CONF_SMART_COLD_OUT = "smart_cold_outdoor"
+CONF_SMART_COLD_LWT = "smart_cold_lwt"
+CONF_SMART_WARM_OUT = "smart_warm_outdoor"
+CONF_SMART_WARM_LWT = "smart_warm_lwt"
+CONF_SMART_MAX_LWT = "smart_max_lwt"
+CONF_SMART_MILD_TEMP = "smart_mild_temp"
+CONF_SMART_OFF_TEMP = "smart_off_temp"
+CONF_SMART_WINDOW_START = "smart_window_start"
+CONF_SMART_WINDOW_END = "smart_window_end"
+CONF_SMART_ROOM_SENSOR = "smart_room_sensor"
+CONF_SMART_ROOM_TARGET = "smart_room_target"
+CONF_SMART_ROOM_MAX_OFFSET = "smart_room_max_offset"
+
+SMART_DEFAULTS = {
+    CONF_SMART_COLD_OUT: -5.0,  # outdoor degC of the cold curve point
+    CONF_SMART_COLD_LWT: 34.0,  # LWT degC at the cold point
+    CONF_SMART_WARM_OUT: 15.0,  # outdoor degC of the warm curve point
+    CONF_SMART_WARM_LWT: 26.0,  # LWT degC at the warm point (25 = reg 1 minimum)
+    CONF_SMART_MAX_LWT: 40.0,  # safety cap (underfloor heating)
+    CONF_SMART_MILD_TEMP: 12.0,  # above: heat only inside the window
+    CONF_SMART_OFF_TEMP: 16.0,  # above: no space heating
+    CONF_SMART_WINDOW_START: "11:00:00",
+    CONF_SMART_WINDOW_END: "17:00:00",
+    CONF_SMART_ROOM_SENSOR: "",
+    CONF_SMART_ROOM_TARGET: 22.0,
+    CONF_SMART_ROOM_MAX_OFFSET: 3,
+}
+
+# --- COP metrics -------------------------------------------------------------
+CONF_COP_ENERGY_SENSOR = "cop_energy_sensor"  # kWh meter of the heat pump (preferred)
+CONF_COP_POWER_SENSOR = "cop_power_sensor"  # W / kW, used if no energy sensor

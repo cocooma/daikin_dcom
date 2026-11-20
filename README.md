@@ -1,29 +1,39 @@
 # Daikin Altherma 3 – DCOM-LT/MB (Modbus TCP) for Home Assistant
 
-Custom integration for a Daikin Altherma 3 heat pump with a Voytech
-**DCOM-LT/MB** module, reached through a Modbus TCP gateway.
+Custom integration for a Daikin Altherma 3 heat pump with a Voytech **DCOM-LT/MB** module, reached through
+a Modbus TCP gateway. It exposes the DCOM's registers as Home Assistant entities and can optionally run its
+own heating curve with mild-day scheduling (**smart heating control**).
+
+Requires Home Assistant 2024.4 or newer and `pymodbus` 3.6.9 or newer (installed automatically).
 
 ## Install
 
-1. Copy `custom_components/daikin_dcom` into your HA `config/custom_components/`.
-2. Restart Home Assistant.
-3. Settings → Devices & services → Add integration → *Daikin Altherma 3 (DCOM-LT/MB Modbus TCP)*.
+**HACS:** HACS → ⋮ → *Custom repositories* → add `https://github.com/cocooma/daikin_dcom` as an
+*Integration*, install *Daikin Altherma 3 (DCOM-LT/MB Modbus TCP)* and restart Home Assistant.
 
-## Setup options
+**Manual:** copy `custom_components/daikin_dcom` into your `config/custom_components/` and restart.
+
+Then: Settings → Devices & services → Add integration → *Daikin Altherma 3 (DCOM-LT/MB Modbus TCP)*.
+
+## Setup
 
 | Field | Meaning |
 |---|---|
 | Host / Port | Modbus TCP gateway (default port 502) |
-| Modbus address | Set with DIP switches SW1.3–SW1.8 on the DCOM (1–63 range, see manual p.3) |
+| Modbus address | Set with DIP switches SW1.3–SW1.8 on the DCOM (1–63, see manual p.3) |
 | Framing | `Modbus TCP` for gateways that convert to Modbus RTU; `RTU over TCP` for transparent serial-to-Ethernet bridges (RTU frames inside TCP) |
 | Temperature control | `Leaving water temperature` uses registers 1/2 (heating 25–55 °C, cooling 5–22 °C). `Room thermostat` uses registers 6/7 (heating 12–30 °C, cooling 15–35 °C) |
 
-Serial settings of the DCOM RS485 side are fixed: 9600 baud, 8N1.
-The control mode and polling interval can be changed later in the integration options.
+The DCOM's RS485 side is fixed at 9600 baud, 8N1.
+
+**Options** (Configure on the integration): temperature control, polling interval (10–600 s, default 30 s) and
+the smart heating settings described below. Saving the options reloads the integration.
 
 ## Entities
 
-**Climate – Space heating/cooling** (one entity for heating and cooling)
+### Climate – Space heating/cooling
+
+One entity for both heating and cooling.
 
 | HVAC mode | Registers written |
 |---|---|
@@ -32,71 +42,91 @@ The control mode and polling interval can be changed later in the integration op
 | cool | 3 = 2, 4 = 1 |
 | auto | 3 = 0, 4 = 1 |
 
-The target temperature changes the heating or the cooling setpoint depending on the active mode
-(in auto mode, the mode the unit is currently running in, input register 38).
-Current temperature: LWT (reg 40) or Remocon room temperature (reg 50), depending on control mode.
+The target temperature changes the heating or the cooling setpoint, depending on the active mode (in auto,
+the mode the unit is running in, input 38). Current temperature is the LWT (input 40) or the Remocon room
+temperature (input 50), depending on the temperature control setting.
 
-With *Leaving water temperature* control and weather dependent mode active (reg 53 = 1 or 3), the unit
-follows its weather curve and the DCOM has no register for the calculated setpoint. The target temperature
-then shows and sets the weather dependent offset instead (reg 54 heating / 55 cooling, -10 to +10 °C);
-the attribute `weather_dependent: true` indicates this. Room thermostat control is unaffected.
+With *Leaving water temperature* control and weather dependent mode active (reg 53 = 1 or 3), the unit follows
+its own curve and the DCOM has no register for the calculated setpoint. The target temperature then shows and
+sets the weather dependent offset instead (reg 54 heating / 55 cooling, −10 to +10 °C); the attribute
+`weather_dependent: true` indicates this.
 
-**Climate – Domestic hot water**: off/heat = DHW reheat (reg 12), target = DHW reheat setpoint 30–60 °C (reg 10),
-current = DHW temperature (input 43), preset `boost` = DHW booster mode (reg 13).
+### Climate – Domestic hot water
 
-Additional entities: temperature sensors, flow rate, error code/sub code, binary sensors
-(error, pump, compressor, booster heater, disinfection, defrost, hot start, 3-way valve),
-quiet mode switch, weather dependent mode select and the two weather dependent LWT offset numbers.
+off / heat = DHW reheat (reg 12), target = DHW reheat setpoint 30–60 °C (reg 10), current = DHW temperature
+(input 43), preset `boost` = DHW booster mode (reg 13).
+
+### Other entities
+
+| Type | Entities |
+|---|---|
+| Sensor | Leaving water (pre PHE, pre BUH), return water, DHW, outside air, liquid refrigerant and Remocon room temperatures; flow rate (l/min); unit error code and sub code |
+| Binary sensor | Unit error, circulation pump, compressor, booster heater, disinfection, defrost/startup, hot start, 3-way valve (on = DHW) |
+| Switch | Quiet mode (reg 9) |
+| Select | Weather dependent mode (reg 53): fixed, weather dependent, fixed + scheduled, weather dependent + scheduled |
+| Number | Weather dependent heating / cooling LWT offset (regs 54 / 55, −10 to +10 °C) |
+| Smart heating | See the next section: control switch, mild-day window switch and times, target LWT and status sensors, heating curve image |
 
 ## Smart heating control (optional)
 
-Runs a heating curve and mild-day scheduling inside Home Assistant instead of the unit's two-point
-weather curve. Turn it on with the **Smart heating control** switch; settings are in the integration options.
+Runs a heating curve and mild-day scheduling inside Home Assistant instead of the unit's two-point weather
+curve. It is aimed at oversized units on underfloor heating, where the compressor's minimum output is more
+than the house needs on mild days: rather than short cycling all day, the unit heats in one long block during
+the warmest hours and the floor slab carries the heat.
 
-While the switch is on and the unit is heating, the controller:
+Turn it on with the **Smart heating control** switch. While it is on and the unit is heating, the controller:
 
 1. sets the setpoint mode to *fixed* (reg 53 = 0); the previous mode is restored when you switch it off,
 2. writes the leaving water setpoint (reg 1) from its own curve, using the outdoor temperature (input 44)
    averaged over about an hour, plus an optional room correction,
 3. pauses space heating (reg 4 = 0) on mild days outside the time window and on warm days, and resumes it.
 
+### Settings (integration options)
+
 | Option | Default | Meaning |
 |---|---|---|
 | Cold point | −5 °C → 34 °C | Curve point; the LWT stays flat below it |
 | Warm point | 15 °C → 26 °C | Curve point; the LWT stays flat above it (reg 1 minimum is 25 °C) |
 | Maximum LWT | 40 °C | Safety cap |
-| Mild day above | 12 °C | Above this, heat only inside the window |
+| Mild day above | 12 °C | Above this, heat only inside the mild-day window |
 | No space heating above | 16 °C | Heating paused |
-| Room sensor / target / max correction | – / 22 °C / 3 °C | Optional: ±1 °C LWT step every 45 min when the room is 0.5 °C off target |
+| Room sensor / target / max correction | – / 22 °C / 3 °C | Optional: ±1 °C LWT step every 45 min while the room is 0.5 °C or more off target |
 
-The **mild-day window** is set from the dashboard, not in the options; changes apply immediately and are kept
-across restarts:
+### Mild-day window (dashboard)
+
+Set from the dashboard rather than the options; changes apply immediately and are kept across restarts.
 
 | Entity | Default | Meaning |
 |---|---|---|
-| Smart heating window start / end (time) | 11:00 / 17:00 | On mild days heating runs only in this window — pick the warmest hours (better COP), the floor slab stores the heat. May cross midnight; start = end means all day |
-| Smart heating mild-day window (switch) | on | Off: no time restriction on mild days (only the "no space heating above" limit applies) |
+| Smart heating window start / end (time) | 11:00 / 17:00 | On mild days heating runs only in this window. Pick the warmest hours for the best COP. May cross midnight; start = end means all day |
+| Smart heating mild-day window (switch) | on | Off: no time restriction on mild days; only the "no space heating above" limit applies |
 
-Behaviour and limits:
+### Status entities
+
+| Entity | Meaning |
+|---|---|
+| Smart heating control (switch) | Enables the controller; its state is restored after a restart. Attribute `status` |
+| Smart heating target LWT (sensor) | Setpoint the controller writes to reg 1. Attributes: averaged outdoor temperature, curve value, room correction, thresholds, window and `curve_points` |
+| Smart heating status (sensor) | `heating`, `paused_mild_outside_window`, `paused_warm`, `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
+| Heating curve (image) | The curve drawn as a picture; see below |
+
+### Behaviour and limits
 
 * Thresholds use 0.5 °C hysteresis. The controller keeps heating on for at least 30 min and off for at least
   20 min, and writes the setpoint at most every 10 min (immediately if it changes by 2 °C or more).
 * It only resumes heating it paused itself: if you switch space heating off, it stays off.
 * It does nothing in cooling mode or during defrost.
-* While it is on, setpoint and weather mode changes made elsewhere (climate entity, select, Daikin UI) are
-  overwritten. Switch it off to take manual control.
-* Overshoot ([9-04]) and the unit's own curve ([1-00]–[1-03]) are field settings with no DCOM register,
-  so they cannot be changed from here.
-
-Entities: **Smart heating control** (switch, state restored after restart), the window time entities and switch above, **Smart heating target LWT** and
-**Smart heating status** (sensors; attributes show the averaged outdoor temperature, curve value and room correction).
+* While it is on, setpoint and weather mode changes made elsewhere (climate entity, select, Daikin user
+  interface) are overwritten. Switch it off to take manual control.
+* Overshoot ([9-04]) and the unit's own curve ([1-00]–[1-03]) are field settings with no DCOM register, so
+  they cannot be changed from here. Set them on the unit's user interface.
 
 ### Heating curve on a dashboard
 
-The integration draws the curve itself: the **Heating curve** image entity is an SVG showing the curve,
-its two points, the mild-day window and "off" zones, and the current operating point (averaged outdoor
-temperature → setpoint written to the unit, with any room correction). It is redrawn when any of these
-change. No custom card is needed; use the built-in Picture entity card:
+The **Heating curve** image entity is an SVG drawn by the integration: the curve with its two points, the
+mild-day window and "off" zones, and the current operating point (averaged outdoor temperature → setpoint
+written to the unit, with any room correction). It is redrawn whenever one of these changes and works with
+light and dark themes. Use the built-in Picture entity card:
 
 ```yaml
 type: picture-entity
@@ -105,21 +135,24 @@ show_name: false
 show_state: false
 ```
 
-The **Smart heating target LWT** sensor also has a `curve_points` attribute (`[outdoor, LWT]` pairs from
-−15 to +20 °C, not recorded) if you want to plot the curve with another card.
+To plot the curve with another card, use the `curve_points` attribute of **Smart heating target LWT**
+(`[outdoor, LWT]` pairs from −15 to +20 °C; not stored in the recorder).
 
 ## Notes
 
-* Register numbers are used as Modbus addresses directly (manual: "Register Base 0").
-  If every value looks shifted by one, your gateway adds a +1 offset; tell me and I will add an option.
-* The DCOM returns 32765 / 32766 / 32767 for "wait for value", "unavailable" and "unsupported";
-  these are mapped to *unavailable* entity states. Right after power-up the DCOM can need up to ~8 minutes
-  to synchronise with the Altherma master (Status LED).
+* Register numbers are used as Modbus addresses directly (manual: "Register Base 0"). If every value looks
+  shifted by one, your gateway adds a +1 offset; please open an issue.
+* The DCOM returns 32765 / 32766 / 32767 for "wait for value", "unavailable" and "unsupported"; these are
+  shown as *unavailable*. Right after power-up the DCOM can need up to about 8 minutes to synchronise with the
+  Altherma master (status LED).
 * Only documented, contiguous register blocks are read, so no undocumented addresses are requested.
-* Setpoints written outside the unit's configured range are clamped by the DCOM; other out-of-range writes are ignored.
-* Written values are shown optimistically and confirmed on the next poll.
+* Setpoints written outside the unit's configured range are clamped by the DCOM; other out-of-range writes
+  are ignored.
+* Written values are shown straight away and confirmed on the next poll.
+* The DCOM has no power or energy registers, so COP cannot be calculated from it alone; use a separate
+  energy meter for that.
 
-## Not tested against hardware
+## Testing status
 
-This was built from the DCOM-LT/MB manual (534-252-A3) and has been syntax-checked only.
-Please test with your unit and report issues.
+Built from the DCOM-LT/MB reference manual (534-252-A3). The smart heating logic and the curve drawing have
+been checked with simulated data; please report anything that behaves differently on your unit.

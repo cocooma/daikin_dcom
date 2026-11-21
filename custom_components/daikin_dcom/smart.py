@@ -46,6 +46,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DOMAIN,
     CONF_SMART_COLD_LWT,
     CONF_SMART_COLD_OUT,
     CONF_SMART_EARLY_DELAY,
@@ -171,6 +172,10 @@ class SmartSettings:
         )
 
 
+def _hm(when: datetime) -> str:
+    return dt_util.as_local(when).strftime("%H:%M")
+
+
 def _as_list(value: Any) -> list[str]:
     """Room entities: a list now, a single id (or "") in older options."""
     if not value:
@@ -246,6 +251,7 @@ class SmartHeatingController:
         self._defrost_prev: int | None = None
         self._comp_stop_at: datetime | None = None  # unit's own stop, not yet handled
         self.last_stop: tuple[datetime, str] | None = None  # diagnostics
+        self.status_entity_id: str | None = None  # set by the status sensor, for the logbook
         self.rest_until: datetime | None = None
         self.starts_today = 0
         self.heating_starts_today = 0
@@ -349,7 +355,7 @@ class SmartHeatingController:
         A stop counts for the rest only when it happens in space heating: not
         while producing hot water (now or on the previous reading), not while
         space heating is off and not while the controller has paused heating
-        itself. Input 35 is "defrost / startup": it is also set while the
+        itself (space heating off). Input 35 is "defrost / startup": it is also set while the
         compressor starts up, so it must not exclude stops - a short run that
         ends during startup is exactly the stop the rest is for.
         """
@@ -375,9 +381,11 @@ class SmartHeatingController:
             if in_dhw:
                 outcome = "ignored (hot water)"
             elif not heating_on:
-                outcome = "ignored (space heating off)"
-            elif self.paused_by_us:
-                outcome = "ignored (paused by controller)"
+                outcome = (
+                    "ignored (paused by controller)"
+                    if self.paused_by_us
+                    else "ignored (space heating off)"
+                )
             elif not self.settings.rest:
                 outcome = "ignored (rest switched off)"
             else:
@@ -396,18 +404,47 @@ class SmartHeatingController:
         if stop is not None and now - stop > timedelta(minutes=5):
             stop = None  # stale: noted while the controller wasn't evaluating
         if not s.rest:
+            if self.rest_until is not None:
+                self._log(
+                    f"Compressor rest switched off; LWT target back to {self.target_lwt} °C"
+                )
             self.rest_until = None
             return False
         if stop is not None and c.value("h", H_SPACE_ONOFF) == 1:
             self.rest_until = stop + self.rest_time
+            minutes = int(self.rest_time.total_seconds() // 60)
+            self._log(
+                f"Compressor stopped at {_hm(stop)}: resting {minutes} min until "
+                f"{_hm(self.rest_until)}; LWT target lowered from {self.target_lwt} °C "
+                f"to {LWT_FLOOR} °C"
+            )
         if self.rest_until is None:
             return False
         if now >= self.rest_until or c.value("i", I_COMPRESSOR) == 1:
             # rest over, or the water fell below 25 °C and the unit restarted
+            why = (
+                "unit restarted the compressor during the rest (water below "
+                f"{LWT_FLOOR} °C)"
+                if c.value("i", I_COMPRESSOR) == 1
+                else "compressor rest over"
+            )
+            self._log(f"{why[0].upper()}{why[1:]}; LWT target back to {self.target_lwt} °C")
             self.rest_until = None
             self._last_setpoint_write = None  # put the curve back straight away
             return False
         return True
+
+    def _log(self, message: str) -> None:
+        """Logbook / Activity entry on the status sensor, plus the HA log."""
+        _LOGGER.info("Smart heating: %s", message)
+        try:
+            from homeassistant.components.logbook import async_log_entry
+
+            async_log_entry(
+                self.hass, "Smart heating", message, DOMAIN, self.status_entity_id
+            )
+        except Exception:  # noqa: BLE001 - logbook not loaded: the HA log is enough
+            pass
 
     def _update_outdoor(self, now: datetime) -> None:
         raw = self.coordinator.temp("i", I_OUTSIDE_TEMP)
@@ -602,6 +639,13 @@ class SmartHeatingController:
         if cooling:
             self.status = STATUS_COOLING
             return
+        if onoff == 1 and self.paused_by_us:
+            # Heating is on although we think we paused it: someone else switched it
+            # back on (climate entity, Daikin UI, restored state after a restart).
+            # Drop the stale flag, otherwise stops are ignored and we never manage it.
+            self._log("Space heating found on while marked as paused; taking over again")
+            self.paused_by_us = False
+            self._paused_reason = None
         if onoff == 0 and not self.paused_by_us:
             self.status = STATUS_USER_OFF  # user switched it off: respect it
             return

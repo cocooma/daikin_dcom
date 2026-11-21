@@ -183,7 +183,8 @@ one is switched back on. The usual minimum run (30 min) and pause (20 min) times
 
 * **Smart heating target LWT** sensor attributes: `room_offset` (current correction), `room_mode`,
   `room_error` (the combined shortfall), `room_driver` (the room that decides in coldest/warmest mode),
-  `rooms` (each room's temperature, target and on/off) and `curve_lwt` (the curve value before the correction).
+  `rooms` (each room's temperature, target and on/off), `curve_lwt` (the curve value before the correction),
+  and for early start `early_start`, `early_start_room` and `cold_room_since`.
 * **Smart heating status**: `paused_rooms_off` while paused because all thermostats are off.
 * **Heating curve** image: the dashed line and the "now" label show the correction, e.g. `now 9.4° → 29° (room +1)`.
 
@@ -226,13 +227,49 @@ Set from the dashboard rather than the options; changes apply immediately and ar
 | Smart heating window start / end (time) | 11:00 / 17:00 | On mild days heating runs only in this window. Pick the warmest hours for the best COP. May cross midnight; start = end means all day |
 | Smart heating mild-day window (switch) | on | Off: no time restriction on mild days; only the "no space heating above" limit applies |
 
+### Early start for cold rooms (optional)
+
+On mild days heating only runs inside the window. With **early start** enabled, a room that gets too cold can
+start the heating outside the window instead of waiting for it.
+
+| Option | Default | Range | Meaning |
+|---|---|---|---|
+| Early start for cold rooms | off | on / off | Enables the rule below |
+| Early start when a room is this far below target | 1.0 °C | 0.5–3 °C | Shortfall that counts as "too cold" |
+| … for at least | 30 min | 10–120 min | How long the room must stay that cold before heating starts |
+| Minimum early-start run | 45 min | 30–180 min | Shortest early run, so the floor slab takes up heat and the compressor doesn't short-cycle |
+
+How it works:
+
+* It only applies while heating is paused because it is a **mild day outside the window**. It does not override
+  the warm cut-off or the pause when all thermostats are off.
+* It uses the rooms selected for [room correction](#room-correction-optional) (switched-off thermostats and
+  unavailable entities are left out) and always looks at the **coldest** room, whatever the room mode.
+* When that room has been at least the set shortfall below its target for the set time, heating resumes (after
+  the usual 20 min minimum pause). Status: `heating_early_start`.
+* It runs on the curve (plus room correction) and ends once the coldest room is within **0.3 °C** of its target and
+  the minimum early-start run has passed. Heating then pauses again until the window opens or another room is
+  too cold. If the window opens during an early run, normal heating simply continues.
+
+Example: 13 °C outside, window 11:00–17:00, bedroom thermostat at 24 °C.
+
+| Time | Bedroom | What happens |
+|---|---|---|
+| 06:29 | 23.0 °C (1.0 below) | the 30 min count starts (`cold_room_since` 06:29) |
+| 06:59 | 22.9 °C | **early start**, heating on (`early_start_room`: the bedroom) |
+| 08:08 | 23.7 °C, within 0.3 | ran 69 min → **pauses** again |
+| 11:00 | – | window opens, normal heating |
+
+Without early start the same room would have dropped to about 22 °C by 11:00. The cost is an extra compressor
+start or two on mild days.
+
 ### Status entities
 
 | Entity | Meaning |
 |---|---|
 | Smart heating control (switch) | Enables the controller; its state is restored after a restart. Attribute `status` |
 | Smart heating target LWT (sensor) | Setpoint the controller writes to reg 1. Attributes: averaged outdoor temperature, curve value, room correction, thresholds, window and `curve_points` |
-| Smart heating status (sensor) | `heating`, `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
+| Smart heating status (sensor) | `heating`, `heating_early_start` (a cold room started heating outside the window), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
 | Heating curve (image) | The curve drawn as a picture; see below |
 
 ### Behaviour and limits

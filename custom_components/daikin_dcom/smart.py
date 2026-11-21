@@ -48,6 +48,10 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_SMART_COLD_LWT,
     CONF_SMART_COLD_OUT,
+    CONF_SMART_EARLY_DELAY,
+    CONF_SMART_EARLY_MIN_RUN,
+    CONF_SMART_EARLY_SHORTFALL,
+    CONF_SMART_EARLY_START,
     CONF_SMART_MAX_LWT,
     CONF_SMART_MILD_TEMP,
     CONF_SMART_OFF_TEMP,
@@ -96,6 +100,9 @@ STATUS_ACTIVE = "heating"
 STATUS_PAUSED_WARM = "paused_warm"
 STATUS_PAUSED_MILD = "paused_mild_outside_window"
 STATUS_PAUSED_ROOMS_OFF = "paused_rooms_off"
+STATUS_EARLY_START = "heating_early_start"
+
+EARLY_STOP_BAND = 0.3  # degC: an early start ends once the coldest room is this close to target
 
 # thermostat modes that count as "on" for heating
 HEAT_MODES = ("heat", "auto", "heat_cool")
@@ -118,6 +125,10 @@ class SmartSettings:
     room_max_offset: int
     room_mode: str
     rooms_off_pause: bool
+    early_start: bool
+    early_shortfall: float
+    early_delay: timedelta
+    early_min_run: timedelta
 
     @classmethod
     def from_options(cls, options: dict[str, Any]) -> SmartSettings:
@@ -138,6 +149,10 @@ class SmartSettings:
             room_max_offset=int(o[CONF_SMART_ROOM_MAX_OFFSET]),
             room_mode=str(o[CONF_SMART_ROOM_MODE]),
             rooms_off_pause=bool(o[CONF_SMART_ROOMS_OFF_PAUSE]),
+            early_start=bool(o[CONF_SMART_EARLY_START]),
+            early_shortfall=float(o[CONF_SMART_EARLY_SHORTFALL]),
+            early_delay=timedelta(minutes=float(o[CONF_SMART_EARLY_DELAY])),
+            early_min_run=timedelta(minutes=float(o[CONF_SMART_EARLY_MIN_RUN])),
         )
 
 
@@ -205,6 +220,11 @@ class SmartHeatingController:
         self.rooms: list[dict[str, Any]] = []
         self.room_error: float | None = None
         self.room_driver: str | None = None
+        # early start for cold rooms (mild-day pause only)
+        self.early_active = False
+        self.early_room: str | None = None
+        self._cold_since: datetime | None = None
+        self._early_started: datetime | None = None
         self._paused_reason: str | None = None
         self.status = STATUS_DISABLED
         self.target_lwt: int | None = None
@@ -361,6 +381,56 @@ class SmartHeatingController:
             self.room_driver = pick(errors, key=errors.get)
             self.room_error = errors[self.room_driver]
 
+    def _coldest_room(self) -> tuple[float, str] | None:
+        """Largest shortfall (target - temperature) of the counted rooms."""
+        usable = [
+            (r["target"] - r["temperature"], r["entity"])
+            for r in self.rooms
+            if r["available"] and r["on"]
+            and r["temperature"] is not None and r["target"] is not None
+        ]
+        return max(usable) if usable else None
+
+    def _early_start(self, now: datetime, allowed: bool, reason: str | None) -> bool:
+        """Let a cold room override the mild-day pause; returns the new allowed.
+
+        Starts when the coldest room has been >= early_shortfall below its
+        target for early_delay. Runs at least early_min_run and ends once the
+        coldest room is within EARLY_STOP_BAND of its target. Any other state
+        (heating allowed anyway, warm cut-off, all thermostats off) cancels it.
+        """
+        s = self.settings
+        if not s.early_start or allowed or reason != "mild":
+            self.early_active = False
+            self._early_started = None
+            self._cold_since = None
+            self.early_room = None
+            return allowed
+
+        coldest = self._coldest_room()
+        if coldest is not None and coldest[0] >= s.early_shortfall:
+            if self._cold_since is None:
+                self._cold_since = now
+        else:
+            self._cold_since = None
+
+        if self.early_active:
+            done = coldest is None or coldest[0] <= EARLY_STOP_BAND
+            ran = self._early_started is not None and now - self._early_started >= s.early_min_run
+            if done and ran:
+                self.early_active = False
+                self._early_started = None
+                self.early_room = None
+                return False
+            return True
+
+        if self._cold_since is not None and now - self._cold_since >= s.early_delay:
+            self.early_active = True
+            self.early_room = coldest[1] if coldest else None
+            self._cold_since = None
+            return True
+        return False
+
     def _all_thermostats_off(self) -> bool:
         """True if at least one selected thermostat is readable and none is on."""
         stats = [r for r in self.rooms if r["thermostat"] and r["available"]]
@@ -464,6 +534,7 @@ class SmartHeatingController:
 
         # 3. pause / resume
         allowed, reason = self._heating_allowed(now)
+        allowed = self._early_start(now, allowed, reason)
         since = (
             None if self._last_onoff_change is None else now - self._last_onoff_change
         )
@@ -481,12 +552,17 @@ class SmartHeatingController:
                 self._last_onoff_change = now
         elif not allowed and onoff == 0:
             self._paused_reason = reason
+        # the early start's minimum run counts from when heating is really on
+        if self.early_active and self._early_started is None and c.value("h", H_SPACE_ONOFF) == 1:
+            self._early_started = now
 
         if self.paused_by_us:
             self.status = {
                 "warm": STATUS_PAUSED_WARM,
                 "rooms_off": STATUS_PAUSED_ROOMS_OFF,
             }.get(self._paused_reason, STATUS_PAUSED_MILD)
+        elif self.early_active:
+            self.status = STATUS_EARLY_START
         else:
             self.status = STATUS_ACTIVE
 
@@ -551,6 +627,11 @@ class SmartHeatingController:
             "room_mode": s.room_mode if s.room_sensors else None,
             "room_error": None if self.room_error is None else round(self.room_error, 1),
             "room_driver": self.room_driver,
+            "early_start": s.early_start,
+            "early_start_room": self.early_room,
+            "cold_room_since": None
+            if self._cold_since is None
+            else dt_util.as_local(self._cold_since).strftime("%H:%M"),
             "rooms": [
                 {
                     "entity": r["entity"],

@@ -72,7 +72,10 @@ design decisions and working conventions behind it.
   value + room offset, clamped to 25..max LWT. Outdoor temperature (input 44) is an EMA with ~60 min τ.
 * Pauses space heating (reg 4 = 0) above the off temperature, and above the mild temperature outside the
   window; 0.5 °C hysteresis; min on 30 min, min off 20 min.
-* Only resumes heating it paused itself (`paused_by_us`); a user "off" is respected.
+* Only resumes heating it paused itself (`paused_by_us`); a user "off" is respected. If space heating is found
+  **on** while `paused_by_us` is set (someone switched it back on, or a restored flag), the flag is cleared on
+  the next evaluation (logbook entry) - a stale flag made every compressor stop "ignored (paused by
+  controller)" and the controller never managed heating again. Stop detection uses the real reg 4 state.
 * Setpoint writes at most every 10 min unless the change is ≥ 2 °C or the curve was just changed.
 * Room correction: ±1 °C step every 45 min when the room is ≥ 0.5 °C off target, limited to ±max.
 * Room correction can use several `sensor`/`climate` entities (thermostats: own target, skipped while off),
@@ -85,7 +88,9 @@ design decisions and working conventions behind it.
   is on, not in DHW (input 37, now or on the previous reading) and not paused by the controller, starts a
   rest. Input 35 is "defrost / startup" and is also set during compressor start-up, so it must NOT exclude
   stops or skip the evaluation (short runs end during start-up); it only suspends pause/resume decisions.
-  `last_compressor_stop` attribute records each stop and its outcome. Space heating stays on (so the pump keeps running with [F-0D] = 0) and reg 1 is set
+  `last_compressor_stop` attribute records each stop and its outcome. Rest start/end setpoint changes are written to the
+  logbook via `homeassistant.components.logbook.async_log_entry`, attached to the status sensor (its entity
+  id is handed to the controller in `async_added_to_hass`); manifest has `after_dependencies: [logbook]`. Space heating stays on (so the pump keeps running with [F-0D] = 0) and reg 1 is set
   to 25 °C; the curve target is written back when the rest ends or the unit restarts by itself. Stops older than
   5 min when handled are ignored. Starts are counted in `_track_compressor`, called from `_schedule` on every
   update even when the controller is disabled; counts persist in the switch's restore data.

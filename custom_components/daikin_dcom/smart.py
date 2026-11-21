@@ -135,7 +135,10 @@ class SmartSettings:
     early_delay: timedelta
     early_min_run: timedelta
     rest: bool
-    rest_time: timedelta
+    rest_cold_out: float  # rest curve: outdoor °C → minutes, flat outside the points
+    rest_cold_min: float
+    rest_mild_out: float
+    rest_mild_min: float
 
     @classmethod
     def from_options(cls, options: dict[str, Any]) -> SmartSettings:
@@ -161,7 +164,10 @@ class SmartSettings:
             early_delay=timedelta(minutes=float(o[CONF_SMART_EARLY_DELAY])),
             early_min_run=timedelta(minutes=float(o[CONF_SMART_EARLY_MIN_RUN])),
             rest=bool(o[CONF_SMART_REST]),
-            rest_time=timedelta(minutes=float(o[CONF_SMART_REST_MINUTES])),
+            rest_cold_out=0.0,
+            rest_cold_min=float(o[CONF_SMART_REST_MINUTES]),
+            rest_mild_out=15.0,
+            rest_mild_min=float(o[CONF_SMART_REST_MINUTES]),
         )
 
 
@@ -378,7 +384,7 @@ class SmartHeatingController:
             self.rest_until = None
             return False
         if stop is not None and c.value("h", H_SPACE_ONOFF) == 1:
-            self.rest_until = stop + s.rest_time
+            self.rest_until = stop + self.rest_time
         if self.rest_until is None:
             return False
         if now >= self.rest_until or c.value("i", I_COMPRESSOR) == 1:
@@ -673,6 +679,36 @@ class SmartHeatingController:
 
     # --- runtime curve settings (number entities) --------------------------
     CURVE_FIELDS = ("cold_out", "cold_lwt", "warm_out", "warm_lwt")
+    REST_FIELDS = ("rest_cold_out", "rest_cold_min", "rest_mild_out", "rest_mild_min")
+
+    @property
+    def rest_time(self) -> timedelta:
+        """Compressor rest from the averaged outdoor temperature (two-point curve)."""
+        s = self.settings
+        t = self.outdoor_avg
+        if t is None or s.rest_mild_out == s.rest_cold_out:
+            return timedelta(minutes=s.rest_cold_min)
+        lo, hi = sorted((s.rest_cold_out, s.rest_mild_out))
+        t = min(max(t, lo), hi)
+        frac = (t - s.rest_cold_out) / (s.rest_mild_out - s.rest_cold_out)
+        minutes = s.rest_cold_min + frac * (s.rest_mild_min - s.rest_cold_min)
+        return timedelta(minutes=round(minutes))
+
+    def rest_valid(self, field: str, value: float) -> bool:
+        """The mild point must stay warmer (outdoor) than the cold point."""
+        s = self.settings
+        cold = value if field == "rest_cold_out" else s.rest_cold_out
+        mild = value if field == "rest_mild_out" else s.rest_mild_out
+        return mild > cold
+
+    @callback
+    def set_rest(self, field: str, value: float) -> None:
+        """Change a rest curve point; applies to the next rest, no writes."""
+        if field not in self.REST_FIELDS:
+            raise ValueError(field)
+        setattr(self.settings, field, float(value))
+        self._notify()
+
 
     def curve_valid(self, field: str, value: float) -> bool:
         """The warm point must stay warmer (outdoor) than the cold point."""
@@ -715,6 +751,9 @@ class SmartHeatingController:
             "room_mode": s.room_mode if s.room_sensors else None,
             "room_error": None if self.room_error is None else round(self.room_error, 1),
             "room_driver": self.room_driver,
+            "compressor_rest_minutes": int(self.rest_time.total_seconds() // 60)
+            if s.rest
+            else None,
             "compressor_rest_until": None
             if self.rest_until is None
             else dt_util.as_local(self.rest_until).strftime("%H:%M"),

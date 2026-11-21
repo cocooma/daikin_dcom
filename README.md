@@ -269,10 +269,23 @@ On mild days the unit's minimum output is more than the house needs, so the wate
 the unit stops the compressor by itself, then restarts it a few minutes later. The compressor rest stretches
 those pauses to limit starts to about two or three an hour.
 
-| Option | Default | Range | Meaning |
+The rest is switched on and off in the options (**Rest the compressor after the unit stops it**, default on).
+Its length follows the outdoor temperature on a **two-point rest curve**, set on the dashboard like the heating
+curve (changes apply to the next rest, no reload, kept across restarts):
+
+| Entity | Default | Range | Meaning |
 |---|---|---|---|
-| Rest the compressor after the unit stops it | on | on / off | Enables the rest |
-| Compressor rest time | 20 min | 5–60 min | How long a restart is held off after the unit's own stop |
+| Compressor rest cold point outdoor | 0 °C | −20 to 15 °C | Below this, the cold point's rest time applies |
+| Compressor rest cold point time | 20 min | 5–60 min | Rest on cold days |
+| Compressor rest mild point outdoor | 15 °C | 0 to 25 °C | Above this, the mild point's rest time applies |
+| Compressor rest mild point time | 20 min | 5–60 min | Rest on mild days |
+
+Between the points the rest time is interpolated from the hour-averaged outdoor temperature (the same one the
+heating curve uses). Both times start at the old *Compressor rest time* option value (20 min), so nothing
+changes until you adjust them. A good starting point is **10 min at 0 °C and 30 min at 15 °C** (≈ 17 min at
++5 °C, ≈ 23 min at +10 °C): on cold days the house needs most of the output and the water cools quickly anyway;
+on mild days the unit makes about twice what the house needs and a long rest saves the most starts. The mild
+point's outdoor temperature must stay above the cold point's.
 
 How it works:
 
@@ -293,7 +306,8 @@ every 5 minutes during thermo-off, which can trigger early restarts. Continuous 
 the slab and the temperature readings valid during the rest, for a few tens of watts of pump power.
 
 **Compressor starts today** (sensor) counts every start since midnight, whether or not smart heating is on.
-Attributes: `space_heating_starts`, `hot_water_starts` and `compressor_rest_until`. Compare days with the rest
+Attributes: `space_heating_starts`, `hot_water_starts` and `compressor_rest_until`; the current rest
+length is the `compressor_rest_minutes` attribute of **Smart heating target LWT**. Compare days with the rest
 on and off to see its effect.
 
 ### Status entities
@@ -321,8 +335,10 @@ on and off to see its effect.
 The **Heating curve** image entity is an SVG drawn by the integration: the curve with its two points, the
 mild-day window and "off" zones, and the current operating point (averaged outdoor temperature → setpoint
 written to the unit, with any room correction). While a room correction is active, the curve shifted by that
-correction is drawn as a dashed line with a small legend: that is what the unit actually gets at each outdoor
-temperature. It is redrawn whenever one of these changes and works with
+correction is drawn as a dashed line: that is what the unit actually gets at each outdoor temperature. While the
+compressor rest is on, the **rest curve** is drawn dotted in teal against a minutes scale on the right. The
+operating point's values are written in a row under the chart (e.g. `now 9.4 °C outside → 29 °C water
+(room +1) · rest 23 min`), followed by a legend row naming the lines. It is redrawn whenever one of these changes and works with
 light and dark themes. Use the built-in Picture entity card:
 
 ```yaml

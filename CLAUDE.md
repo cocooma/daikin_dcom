@@ -80,7 +80,8 @@ design decisions and working conventions behind it.
 * Early start (option, off by default): during a mild-day pause outside the window, the coldest counted room
   ≥ shortfall (1.0 °C) below target for a delay (30 min) resumes heating (`heating_early_start`); it ends when
   that room is within 0.3 °C and the minimum early run (45 min) has passed. Not applied to warm or rooms-off pauses.
-* Compressor rest (option, on by default, 20 min): a compressor 1→0 transition (input 31) while space heating
+* Compressor rest (option, on by default; length from a two-point rest curve on the dashboard, outdoor EMA →
+  minutes, `rest_cold_*`/`rest_mild_*` restore numbers seeded from the old 20 min option): a compressor 1→0 transition (input 31) while space heating
   is on, not in DHW (input 37) or defrost (input 35), now or on the previous reading, and not paused by the
   controller, starts a rest. Space heating stays on (so the pump keeps running with [F-0D] = 0) and reg 1 is set
   to 25 °C; the curve target is written back when the rest ends or the unit restarts by itself. Stops older than
@@ -98,7 +99,9 @@ design decisions and working conventions behind it.
 
 * apexcharts-card was dropped (not maintained recently); the integration draws the curve itself as an SVG
   image entity shown with the built-in Picture entity card. Colours are chosen to work on light and dark
-  themes; the "now" label is placed on the side of the curve that keeps it readable.
+  themes. With the room-corrected (dashed) and rest (dotted, right-hand minutes scale) curves there is no
+  reliably free spot inside the plot, so the "now" text and the legend are rows below the chart; only the dot
+  stays on the chart.
 * One combined climate entity for heating and cooling, separate DHW climate.
 * Everything user-facing is in English; strings live in `strings.json` and are copied to
   `translations/en.json` (keep them identical).

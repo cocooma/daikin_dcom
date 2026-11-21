@@ -118,7 +118,7 @@ CONF_SMART_EARLY_SHORTFALL = "smart_early_start_shortfall"
 CONF_SMART_EARLY_DELAY = "smart_early_start_delay"
 CONF_SMART_EARLY_MIN_RUN = "smart_early_start_min_run"
 CONF_SMART_REST = "smart_compressor_rest"  # hold off restarts after the unit stops the compressor
-CONF_SMART_REST_MINUTES = "smart_compressor_rest_minutes"
+CONF_SMART_REST_MINUTES = "smart_compressor_rest_minutes"  # starting value for both rest curve points
 
 ROOM_MODE_COLDEST = "coldest"
 ROOM_MODE_AVERAGE = "average"

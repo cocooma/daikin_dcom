@@ -289,8 +289,10 @@ point's outdoor temperature must stay above the cold point's.
 
 How it works:
 
-* When the compressor goes from running to stopped **in space heating** (not while making hot water or
-  defrosting, not while space heating is off and not because the controller paused heating), the rest starts.
+* When the compressor goes from running to stopped **in space heating** (not while making hot water, not while
+  space heating is off and not because the controller paused heating), the rest starts. The unit's
+  *defrost / startup* flag (input 35) does not block it: it is also set during compressor start-up, and a short
+  run that stops during start-up is exactly what the rest is for.
 * **Space heating stays on** and the leaving water target is lowered to **25 °C** (register 1 minimum). The water
   is warmer than that, so the unit stays in thermo-off and doesn't restart, while the circulation pump keeps
   running (with [F-0D] = 0, see below).
@@ -307,7 +309,12 @@ the slab and the temperature readings valid during the rest, for a few tens of w
 
 **Compressor starts today** (sensor) counts every start since midnight, whether or not smart heating is on.
 Attributes: `space_heating_starts`, `hot_water_starts` and `compressor_rest_until`; the current rest
-length is the `compressor_rest_minutes` attribute of **Smart heating target LWT**. Compare days with the rest
+length is the `compressor_rest_minutes` attribute of **Smart heating target LWT**, and
+`last_compressor_stop` there shows the last stop and what was done with it (e.g. `21:30 rest`,
+`21:52 ignored (hot water)`, `ignored (paused by controller)`, `ignored (smart heating off)`).
+
+If the target doesn't drop to 25 °C during a rest, check the unit's minimum heating LWT **[9-01]**: the DCOM
+clamps written setpoints to the unit's configured range, so a minimum above 25 °C is written instead. Compare days with the rest
 on and off to see its effect.
 
 ### Status entities

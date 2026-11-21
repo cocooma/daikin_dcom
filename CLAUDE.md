@@ -82,8 +82,10 @@ design decisions and working conventions behind it.
   that room is within 0.3 °C and the minimum early run (45 min) has passed. Not applied to warm or rooms-off pauses.
 * Compressor rest (option, on by default; length from a two-point rest curve on the dashboard, outdoor EMA →
   minutes, `rest_cold_*`/`rest_mild_*` restore numbers seeded from the old 20 min option): a compressor 1→0 transition (input 31) while space heating
-  is on, not in DHW (input 37) or defrost (input 35), now or on the previous reading, and not paused by the
-  controller, starts a rest. Space heating stays on (so the pump keeps running with [F-0D] = 0) and reg 1 is set
+  is on, not in DHW (input 37, now or on the previous reading) and not paused by the controller, starts a
+  rest. Input 35 is "defrost / startup" and is also set during compressor start-up, so it must NOT exclude
+  stops or skip the evaluation (short runs end during start-up); it only suspends pause/resume decisions.
+  `last_compressor_stop` attribute records each stop and its outcome. Space heating stays on (so the pump keeps running with [F-0D] = 0) and reg 1 is set
   to 25 °C; the curve target is written back when the rest ends or the unit restarts by itself. Stops older than
   5 min when handled are ignored. Starts are counted in `_track_compressor`, called from `_schedule` on every
   update even when the controller is disabled; counts persist in the switch's restore data.

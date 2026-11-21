@@ -263,13 +263,46 @@ Example: 13 °C outside, window 11:00–17:00, bedroom thermostat at 24 °C.
 Without early start the same room would have dropped to about 22 °C by 11:00. The cost is an extra compressor
 start or two on mild days.
 
+### Compressor rest (on by default)
+
+On mild days the unit's minimum output is more than the house needs, so the water overshoots its target and
+the unit stops the compressor by itself, then restarts it a few minutes later. The compressor rest stretches
+those pauses to limit starts to about two or three an hour.
+
+| Option | Default | Range | Meaning |
+|---|---|---|---|
+| Rest the compressor after the unit stops it | on | on / off | Enables the rest |
+| Compressor rest time | 20 min | 5–60 min | How long a restart is held off after the unit's own stop |
+
+How it works:
+
+* When the compressor goes from running to stopped **in space heating** (not while making hot water or
+  defrosting, not while space heating is off and not because the controller paused heating), the rest starts.
+* **Space heating stays on** and the leaving water target is lowered to **25 °C** (register 1 minimum). The water
+  is warmer than that, so the unit stays in thermo-off and doesn't restart, while the circulation pump keeps
+  running (with [F-0D] = 0, see below).
+* After the rest time the curve target is written back straight away and the unit restarts once the water has
+  cooled below it. Status during the rest: `compressor_rest`.
+* If the water cools to 25 °C before the rest is over (cold day, all loops open), the unit restarts by itself;
+  the rest then simply ends and the curve target comes back. The house needed the heat.
+* Hot water is never held back.
+
+**Unit setting – circulation pump:** set **[F-0D] pump operation mode = 0 (Continuous)** in *Overview field
+settings*. Daikin switches the pump off whenever space heating is off, and in *Sample* mode (1) it only runs
+every 5 minutes during thermo-off, which can trigger early restarts. Continuous keeps the warm water moving into
+the slab and the temperature readings valid during the rest, for a few tens of watts of pump power.
+
+**Compressor starts today** (sensor) counts every start since midnight, whether or not smart heating is on.
+Attributes: `space_heating_starts`, `hot_water_starts` and `compressor_rest_until`. Compare days with the rest
+on and off to see its effect.
+
 ### Status entities
 
 | Entity | Meaning |
 |---|---|
 | Smart heating control (switch) | Enables the controller; its state is restored after a restart. Attribute `status` |
 | Smart heating target LWT (sensor) | Setpoint the controller writes to reg 1. Attributes: averaged outdoor temperature, curve value, room correction, thresholds, window and `curve_points` |
-| Smart heating status (sensor) | `heating`, `heating_early_start` (a cold room started heating outside the window), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
+| Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
 | Heating curve (image) | The curve drawn as a picture; see below |
 
 ### Behaviour and limits

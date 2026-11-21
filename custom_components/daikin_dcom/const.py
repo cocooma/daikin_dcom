@@ -117,6 +117,8 @@ CONF_SMART_EARLY_START = "smart_early_start"
 CONF_SMART_EARLY_SHORTFALL = "smart_early_start_shortfall"
 CONF_SMART_EARLY_DELAY = "smart_early_start_delay"
 CONF_SMART_EARLY_MIN_RUN = "smart_early_start_min_run"
+CONF_SMART_REST = "smart_compressor_rest"  # hold off restarts after the unit stops the compressor
+CONF_SMART_REST_MINUTES = "smart_compressor_rest_minutes"
 
 ROOM_MODE_COLDEST = "coldest"
 ROOM_MODE_AVERAGE = "average"
@@ -142,4 +144,6 @@ SMART_DEFAULTS = {
     CONF_SMART_EARLY_SHORTFALL: 1.0,  # degC below target ...
     CONF_SMART_EARLY_DELAY: 30,  # ... for this many minutes
     CONF_SMART_EARLY_MIN_RUN: 45,  # minutes an early start runs at least
+    CONF_SMART_REST: True,
+    CONF_SMART_REST_MINUTES: 20,
 }

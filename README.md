@@ -141,7 +141,9 @@ Set from the dashboard rather than the options; changes apply immediately and ar
 
 The **Heating curve** image entity is an SVG drawn by the integration: the curve with its two points, the
 mild-day window and "off" zones, and the current operating point (averaged outdoor temperature → setpoint
-written to the unit, with any room correction). It is redrawn whenever one of these changes and works with
+written to the unit, with any room correction). While a room correction is active, the curve shifted by that
+correction is drawn as a dashed line with a small legend: that is what the unit actually gets at each outdoor
+temperature. It is redrawn whenever one of these changes and works with
 light and dark themes. Use the built-in Picture entity card:
 
 ```yaml

@@ -38,7 +38,9 @@
           "smart_early_start": "Smart heating: early start for cold rooms (outside the mild-day window)",
           "smart_early_start_shortfall": "Smart heating: early start when a room is this far below target",
           "smart_early_start_delay": "Smart heating: … for at least (minutes)",
-          "smart_early_start_min_run": "Smart heating: minimum early-start run (minutes)"
+          "smart_early_start_min_run": "Smart heating: minimum early-start run (minutes)",
+          "smart_compressor_rest": "Smart heating: rest the compressor after the unit stops it",
+          "smart_compressor_rest_minutes": "Smart heating: compressor rest time (minutes)"
         },
         "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The heating curve points and the mild-day window are set on the dashboard with the 'Heating curve ...' and 'Smart heating window ...' entities."
       }
@@ -81,7 +83,8 @@
           "paused_warm": "Paused (warm)",
           "paused_mild_outside_window": "Paused (mild, outside window)",
           "paused_rooms_off": "Paused (all thermostats off)",
-          "heating_early_start": "Heating (early start, cold room)"
+          "heating_early_start": "Heating (early start, cold room)",
+          "compressor_rest": "Compressor resting"
         }
       }
     }

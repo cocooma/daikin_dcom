@@ -21,7 +21,9 @@ Rules
     is switched off by the user, it stays off.
   * Nothing is touched in cooling mode or while defrosting.
 
-Settings (curve, thresholds, room sensor) live in the integration options.
+The curve points are set at runtime through the "Heating curve ..." number
+entities (initial values from the integration options); thresholds and the
+room sensor live in the integration options.
 The mild-day window (start, end, on/off) is set at runtime through the
 "Smart heating window start/end" time entities and the "Smart heating
 mild-day window" switch, which restore their own state. Runtime state (enabled, paused-by-us, room offset, previous mode)
@@ -415,6 +417,28 @@ class SmartHeatingController:
         if enabled is not None:
             s.window_enabled = enabled
         self._schedule()
+
+    # --- runtime curve settings (number entities) --------------------------
+    CURVE_FIELDS = ("cold_out", "cold_lwt", "warm_out", "warm_lwt")
+
+    def curve_valid(self, field: str, value: float) -> bool:
+        """The warm point must stay warmer (outdoor) than the cold point."""
+        s = self.settings
+        cold = value if field == "cold_out" else s.cold_out
+        warm = value if field == "warm_out" else s.warm_out
+        return warm > cold
+
+    @callback
+    def set_curve(self, field: str, value: float, evaluate: bool = True) -> None:
+        """Change a curve point; evaluate=False while restoring at startup."""
+        if field not in self.CURVE_FIELDS:
+            raise ValueError(field)
+        setattr(self.settings, field, float(value))
+        if evaluate:
+            self._last_setpoint_write = None  # apply the new curve straight away
+            self._schedule()
+        else:
+            self._notify()
 
     # --- for entities ------------------------------------------------------
     @property

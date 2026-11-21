@@ -27,10 +27,6 @@
         "data": {
           "control_mode": "Temperature control",
           "scan_interval": "Polling interval (seconds)",
-          "smart_cold_outdoor": "Smart heating: cold point outdoor temperature",
-          "smart_cold_lwt": "Smart heating: leaving water at the cold point",
-          "smart_warm_outdoor": "Smart heating: warm point outdoor temperature",
-          "smart_warm_lwt": "Smart heating: leaving water at the warm point (min 25)",
           "smart_max_lwt": "Smart heating: maximum leaving water",
           "smart_mild_temp": "Smart heating: mild day above (heat only inside the window)",
           "smart_off_temp": "Smart heating: no space heating above",
@@ -38,11 +34,10 @@
           "smart_room_target": "Smart heating: room target temperature",
           "smart_room_max_offset": "Smart heating: maximum room correction (°C)"
         },
-        "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The mild-day time window is set with the 'Smart heating window start/end' entities and the 'Smart heating mild-day window' switch."
+        "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The heating curve points and the mild-day window are set on the dashboard with the 'Heating curve ...' and 'Smart heating window ...' entities."
       }
     },
     "error": {
-      "warm_below_cold": "The warm point must be warmer than the cold point.",
       "off_below_mild": "'No space heating above' must not be lower than the mild-day temperature."
     }
   },

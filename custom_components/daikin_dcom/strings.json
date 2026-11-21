@@ -34,7 +34,11 @@
           "smart_room_target": "Smart heating: room target (for plain sensors; thermostats use their own)",
           "smart_room_max_offset": "Smart heating: maximum room correction (°C)",
           "smart_room_mode": "Smart heating: room that drives the correction",
-          "smart_rooms_off_pause": "Smart heating: pause heating when all selected thermostats are off"
+          "smart_rooms_off_pause": "Smart heating: pause heating when all selected thermostats are off",
+          "smart_early_start": "Smart heating: early start for cold rooms (outside the mild-day window)",
+          "smart_early_start_shortfall": "Smart heating: early start when a room is this far below target",
+          "smart_early_start_delay": "Smart heating: … for at least (minutes)",
+          "smart_early_start_min_run": "Smart heating: minimum early-start run (minutes)"
         },
         "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The heating curve points and the mild-day window are set on the dashboard with the 'Heating curve ...' and 'Smart heating window ...' entities."
       }
@@ -76,7 +80,8 @@
           "heating": "Heating",
           "paused_warm": "Paused (warm)",
           "paused_mild_outside_window": "Paused (mild, outside window)",
-          "paused_rooms_off": "Paused (all thermostats off)"
+          "paused_rooms_off": "Paused (all thermostats off)",
+          "heating_early_start": "Heating (early start, cold room)"
         }
       }
     }

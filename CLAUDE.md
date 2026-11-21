@@ -75,6 +75,11 @@ design decisions and working conventions behind it.
 * Only resumes heating it paused itself (`paused_by_us`); a user "off" is respected.
 * Setpoint writes at most every 10 min unless the change is ≥ 2 °C or the curve was just changed.
 * Room correction: ±1 °C step every 45 min when the room is ≥ 0.5 °C off target, limited to ±max.
+* Room correction can use several `sensor`/`climate` entities (thermostats: own target, skipped while off),
+  combined as coldest/average/warmest; optional pause (`paused_rooms_off`) when every readable thermostat is off.
+* Early start (option, off by default): during a mild-day pause outside the window, the coldest counted room
+  ≥ shortfall (1.0 °C) below target for a delay (30 min) resumes heating (`heating_early_start`); it ends when
+  that room is within 0.3 °C and the minimum early run (45 min) has passed. Not applied to warm or rooms-off pauses.
 * Runtime state (enabled, paused_by_us, room offset, previous mode) persists through the switch's restore
   data. Window times/switch and curve points are their own restore entities; restoring them must not
   trigger writes (`set_curve(..., evaluate=False)`, `restore()` only notifies).

@@ -1,5 +1,8 @@
 """Image entity: the smart heating curve drawn as SVG (no custom card needed).
 
+When a room correction is active, the curve shifted by that correction is
+drawn as a dashed line (what the unit actually gets), with a small legend.
+
 Show it with the built-in Picture entity card. The picture is redrawn when
 the curve, thresholds, window or operating point change.
 """
@@ -16,6 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import DcomCoordinator
+from .smart import LWT_FLOOR, curve_lwt
 
 W, H = 640, 360
 ML, MR, MT, MB = 48, 16, 16, 40  # margins
@@ -39,7 +43,16 @@ async def async_setup_entry(
 def render_curve_svg(smart) -> str:
     s = smart.settings
     points = smart.curve_points
-    lwts = [p[1] for p in points]
+    offset = smart.room_offset
+    corrected = (
+        [
+            [t, max(LWT_FLOOR, min(s.max_lwt, curve_lwt(s, t) + offset))]
+            for t, _ in points
+        ]
+        if offset
+        else []
+    )
+    lwts = [p[1] for p in points] + [p[1] for p in corrected]
     if smart.target_lwt is not None:
         lwts.append(smart.target_lwt)
     y_min = math.floor(min(lwts) / 2) * 2 - 2
@@ -94,6 +107,21 @@ def render_curve_svg(smart) -> str:
     # curve
     line = " ".join(f"{x(t):.1f},{y(v):.1f}" for t, v in points)
     out.append(f'<polyline points="{line}" fill="none" stroke="{CURVE}" stroke-width="3"/>')
+    if corrected:
+        dashed = " ".join(f"{x(t):.1f},{y(v):.1f}" for t, v in corrected)
+        out.append(
+            f'<polyline points="{dashed}" fill="none" stroke="{CURVE}" stroke-width="2" '
+            'stroke-dasharray="7 5" opacity="0.85"/>'
+        )
+        # legend, bottom left: the curve is high on the left, so this corner is free
+        lx, ly = ML + 12, MT + ph - 30
+        out.append(f'<line x1="{lx}" y1="{ly}" x2="{lx + 24}" y2="{ly}" stroke="{CURVE}" stroke-width="3"/>')
+        out.append(f'<text x="{lx + 32}" y="{ly + 4}" fill="{TEXT}">curve</text>')
+        out.append(
+            f'<line x1="{lx}" y1="{ly + 18}" x2="{lx + 24}" y2="{ly + 18}" stroke="{CURVE}" '
+            'stroke-width="2" stroke-dasharray="7 5"/>'
+        )
+        out.append(f'<text x="{lx + 32}" y="{ly + 22}" fill="{TEXT}">with room correction {offset:+d} °C</text>')
     for t, v in ((s.cold_out, s.cold_lwt), (s.warm_out, s.warm_lwt)):
         if X_MIN <= t <= X_MAX:
             out.append(f'<circle cx="{x(t):.1f}" cy="{y(v):.1f}" r="4" fill="{CURVE}"/>')
@@ -109,10 +137,29 @@ def render_curve_svg(smart) -> str:
         label = f"now {smart.outdoor_avg:.1f}° → {smart.target_lwt}°"
         if smart.room_offset:
             label += f" (room {smart.room_offset:+d})"
-        anchor = "end" if cx > ML + pw * 0.6 else "start"
-        dx = -10 if anchor == "end" else 10
-        curve_here = smart.curve_value if smart.curve_value is not None else smart.target_lwt
-        dy = -10 if smart.target_lwt >= curve_here else 20  # keep the label off the curve
+        # The point sits on the dashed line when a room correction is active,
+        # otherwise on the curve. Lines fall to the right, so the free side is
+        # up-right above them and down-left below them. With a positive
+        # correction the solid curve is below the point (go above); with a
+        # negative one it is above (go below).
+        if offset:
+            above = offset > 0
+        else:
+            curve_here = (
+                smart.curve_value if smart.curve_value is not None else smart.target_lwt
+            )
+            above = smart.target_lwt >= curve_here
+        anchor = "start" if above else "end"
+        flipped = False
+        if anchor == "start" and cx > ML + pw * 0.75:
+            anchor, flipped = "end", True
+        elif anchor == "end" and cx < ML + pw * 0.35:
+            anchor, flipped = "start", True
+        dx = 10 if anchor == "start" else -10
+        if above:
+            dy = -24 if flipped else -10
+        else:
+            dy = 32 if flipped else 20
         out.append(
             f'<text x="{cx + dx:.1f}" y="{cy + dy:.1f}" fill="{NOW}" text-anchor="{anchor}">{label}</text>'
         )

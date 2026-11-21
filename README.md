@@ -27,7 +27,7 @@ Then: Settings → Devices & services → Add integration → *Daikin Altherma 3
 The DCOM's RS485 side is fixed at 9600 baud, 8N1.
 
 **Options** (Configure on the integration): temperature control, polling interval (10–600 s, default 30 s) and
-the smart heating thresholds and room sensor described below. Saving the options reloads the integration.
+the smart heating thresholds and room correction settings described below. Saving the options reloads the integration.
 
 ## Entities
 
@@ -88,7 +88,116 @@ Turn it on with the **Smart heating control** switch. While it is on and the uni
 | Maximum LWT | 40 °C | Safety cap |
 | Mild day above | 12 °C | Above this, heat only inside the mild-day window |
 | No space heating above | 16 °C | Heating paused |
-| Room sensor / target / max correction | – / 22 °C / 3 °C | Optional: ±1 °C LWT step every 45 min while the room is 0.5 °C or more off target |
+| Rooms / room target / room mode / pause when all thermostats off / max correction | – / 22 °C / coldest / on / 3 °C | Optional room correction, see [Room correction](#room-correction-optional) |
+
+### Room correction (optional)
+
+The curve sets the leaving water from the outdoor temperature only. Room correction adds feedback from real
+room temperatures, so the controller can make up for sun, wind, internal gains or a curve that is slightly off.
+It shifts the leaving water setpoint in whole degrees on top of the curve.
+
+You can select **one or more** rooms, as plain temperature sensors, room thermostats (climate entities, e.g.
+the Daikin EKRTCTRL1 / EKWHCTRL1 wall controls) or a mix of both.
+
+#### Setting it up
+
+1. Pick the rooms. Good choices represent the house, e.g. the living room and bedrooms. Avoid rooms with a
+   fireplace or strong sun and sensors near windows, doors or other heat sources.
+2. Settings → Devices & services → *Daikin Altherma 3 (DCOM-LT/MB)* → **Configure**.
+3. Fill in:
+
+   | Option | Range / values | Meaning |
+   |---|---|---|
+   | Room temperature sensors and/or thermostats | – | Any number of `sensor` entities with the *temperature* device class (°C) and/or `climate` entities. Empty = room correction off |
+   | Room target | 15–28 °C (default 22) | Target for **plain sensors**. Thermostats use their own target temperature |
+   | Room that drives the correction | coldest (default), average, warmest | How the rooms are combined, see below |
+   | Pause heating when all selected thermostats are off | on (default) / off | See [Thermostats switched off](#thermostats-switched-off) |
+   | Maximum room correction | 0–5 °C (default 3) | How far the leaving water may be shifted up or down. 0 = room correction off |
+
+4. Save. The integration reloads, and the correction runs whenever **Smart heating control** is on.
+
+#### How rooms are read
+
+| Entity | Temperature | Target | Counted when |
+|---|---|---|---|
+| `sensor.*` | its state | *Room target* option | always (if it has a number) |
+| `climate.*` | `current_temperature` attribute | its `temperature` attribute (or `target_temp_low`; else the *Room target* option) | its mode is `heat`, `auto` or `heat_cool` |
+
+For each counted room the controller works out the **shortfall** = target − temperature (positive = too cold).
+The rooms are then combined according to *Room that drives the correction*:
+
+* **coldest** – the room with the largest shortfall decides. Every room gets to its target; rooms that warm up
+  faster may run a little above theirs. Best when all rooms must be comfortable.
+* **average** – the average shortfall of all counted rooms decides. Smoother, but one cold room can stay below
+  its target if the others are warm.
+* **warmest** – the room with the smallest shortfall decides. Avoids overheating any room; colder rooms may
+  stay below target.
+
+Unavailable entities, switched-off thermostats and rooms without a reading are left out. If no room is left, the
+correction holds its value.
+
+#### How the correction moves
+
+* On each evaluation (every poll and once a minute) the combined shortfall is checked:
+  * 0.5 °C or more **too cold** → correction **+1 °C**,
+  * 0.5 °C or more **too warm** → correction **−1 °C**,
+  * within ±0.5 °C → the correction stays where it is (it does not drift back to 0 by itself).
+* After a step it waits at least **45 minutes** before the next one, because underfloor heating reacts slowly.
+  Steps accumulate up to the maximum: with a 3 °C maximum, a cold room goes +1 → +2 → +3 over about 1.5 hours.
+* The setpoint written to the unit is `curve value + correction`, rounded to whole degrees and then limited to
+  25 °C (register minimum) … *maximum LWT*. Near the warm end of the curve a negative correction can therefore
+  have no effect.
+* The correction keeps being evaluated while the controller has paused heating (mild-day window, warm
+  cut-off). After a long pause in a cooling room it may therefore resume one or two degrees higher. It is not
+  evaluated in cooling mode, during defrost or while space heating is switched off by you.
+* The correction is kept across restarts and reset to 0 when smart heating control is switched off.
+
+Example, mode *coldest*, three rooms:
+
+| Room | Temperature | Target | Shortfall |
+|---|---|---|---|
+| Living room (sensor) | 23.2 °C | 24 °C (option) | +0.8 |
+| Bedroom (sensor) | 24.4 °C | 24 °C (option) | −0.4 |
+| Bathroom (thermostat, heat) | 23.0 °C | 25 °C (its own) | **+2.0** ← drives |
+
+The bathroom is 2 °C short, so the correction steps up. With *average* the shortfall would be +0.8 (still a
+step up); with *warmest* it would be −0.4 (no change).
+
+#### Thermostats switched off
+
+A thermostat in mode `off` (or `cool`) is **left out** of the correction: a room you switched off doesn't ask
+for heat.
+
+With *Pause heating when all selected thermostats are off* enabled, space heating is **paused** (reg 4 = 0,
+status `paused_rooms_off`) while **every** selected thermostat that can be read is off, and resumes as soon as
+one is switched back on. The usual minimum run (30 min) and pause (20 min) times apply. Notes:
+
+* Only thermostats count for this rule. Plain sensors have no on/off and don't prevent the pause, so if you mix
+  sensors with a single thermostat, switching that thermostat off pauses the heating.
+* Unavailable thermostats are ignored. If none can be read, the pause is not applied.
+* The pause comes before the warm and mild-day rules, and like them it only resumes heating that the
+  controller paused itself.
+* Turn the option off if you only want switched-off rooms ignored, without pausing the heat pump.
+
+#### Where to see it
+
+* **Smart heating target LWT** sensor attributes: `room_offset` (current correction), `room_mode`,
+  `room_error` (the combined shortfall), `room_driver` (the room that decides in coldest/warmest mode),
+  `rooms` (each room's temperature, target and on/off) and `curve_lwt` (the curve value before the correction).
+* **Smart heating status**: `paused_rooms_off` while paused because all thermostats are off.
+* **Heating curve** image: the dashed line and the "now" label show the correction, e.g. `now 9.4° → 29° (room +1)`.
+
+#### Tips
+
+* **Tune the curve first.** The correction is for fine-tuning. If it sits at the maximum (or minimum) for days,
+  the curve itself is off: move the curve's LWT points by that amount and the correction will settle near 0.
+* **Coldest room always at the maximum:** that room may need more flow on its manifold loop rather than a
+  hotter house. Check its flow meter before raising the curve.
+* **Room overshoots and undershoots around the target:** reduce the maximum to 1–2 °C. A large correction on a
+  slow floor makes the rooms swing.
+* **Mild-day window:** expect the correction to rise during long pauses. A maximum of 2 °C keeps the start of
+  the next run from being too hot.
+* **Turning it off:** clear the room list or set the maximum to 0 in the options.
 
 ### Heating curve (dashboard)
 
@@ -123,7 +232,7 @@ Set from the dashboard rather than the options; changes apply immediately and ar
 |---|---|
 | Smart heating control (switch) | Enables the controller; its state is restored after a restart. Attribute `status` |
 | Smart heating target LWT (sensor) | Setpoint the controller writes to reg 1. Attributes: averaged outdoor temperature, curve value, room correction, thresholds, window and `curve_points` |
-| Smart heating status (sensor) | `heating`, `paused_mild_outside_window`, `paused_warm`, `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
+| Smart heating status (sensor) | `heating`, `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
 | Heating curve (image) | The curve drawn as a picture; see below |
 
 ### Behaviour and limits

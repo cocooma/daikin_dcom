@@ -33,6 +33,10 @@ from .const import (
     CONF_SMART_ROOM_MODE,
     CONF_SMART_ROOM_SENSOR,
     CONF_SMART_ROOMS_OFF_PAUSE,
+    CONF_SMART_EARLY_DELAY,
+    CONF_SMART_EARLY_MIN_RUN,
+    CONF_SMART_EARLY_SHORTFALL,
+    CONF_SMART_EARLY_START,
     ROOM_MODES,
     CONF_SMART_ROOM_TARGET,
     SMART_DEFAULTS,
@@ -190,6 +194,18 @@ class DcomOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SMART_ROOMS_OFF_PAUSE, default=opts[CONF_SMART_ROOMS_OFF_PAUSE]
                 ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_SMART_EARLY_START, default=opts[CONF_SMART_EARLY_START]
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_SMART_EARLY_SHORTFALL, default=opts[CONF_SMART_EARLY_SHORTFALL]
+                ): _num(0.5, 3, 0.1),
+                vol.Required(
+                    CONF_SMART_EARLY_DELAY, default=opts[CONF_SMART_EARLY_DELAY]
+                ): _num(10, 120, 5, "min"),
+                vol.Required(
+                    CONF_SMART_EARLY_MIN_RUN, default=opts[CONF_SMART_EARLY_MIN_RUN]
+                ): _num(30, 180, 5, "min"),
                 vol.Required(
                     CONF_SMART_ROOM_TARGET, default=opts[CONF_SMART_ROOM_TARGET]
                 ): _num(15, 28, 0.5),

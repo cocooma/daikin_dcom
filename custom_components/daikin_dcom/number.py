@@ -33,6 +33,7 @@ async def async_setup_entry(
                 "Weather dependent cooling LWT offset", H_WEATHER_COOL_OFFSET,
             ),
             *(DcomCurveNumber(coordinator, *spec) for spec in CURVE_NUMBERS),
+            *(DcomRestNumber(coordinator, *spec) for spec in REST_NUMBERS),
         ]
     )
 
@@ -43,6 +44,14 @@ CURVE_NUMBERS = (
     ("cold_lwt", "Heating curve cold point LWT", 25, 55, "mdi:water-thermometer"),
     ("warm_out", "Heating curve warm point outdoor", 0, 25, "mdi:sun-thermometer"),
     ("warm_lwt", "Heating curve warm point LWT", 25, 55, "mdi:water-thermometer-outline"),
+)
+
+# field, name, min, max, step, unit
+REST_NUMBERS = (
+    ("rest_cold_out", "Compressor rest cold point outdoor", -20, 15, 0.5, "°C"),
+    ("rest_cold_min", "Compressor rest cold point time", 5, 60, 1, "min"),
+    ("rest_mild_out", "Compressor rest mild point outdoor", 0, 25, 0.5, "°C"),
+    ("rest_mild_min", "Compressor rest mild point time", 5, 60, 1, "min"),
 )
 
 
@@ -117,4 +126,57 @@ class DcomCurveNumber(DcomEntity, RestoreNumber):
                 "The warm point outdoor temperature must be higher than the cold point's."
             )
         self._smart.set_curve(self._field, value)
+        self.async_write_ha_state()
+
+
+class DcomRestNumber(DcomEntity, RestoreNumber):
+    """One point of the compressor rest curve (outdoor °C → rest minutes).
+
+    Applies to the next rest, no reload; restored after a restart. Both rest
+    times start from the old "Compressor rest time" option (default 20 min).
+    """
+
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(
+        self,
+        coordinator: DcomCoordinator,
+        field: str,
+        name: str,
+        lo: float,
+        hi: float,
+        step: float,
+        unit: str,
+    ) -> None:
+        super().__init__(coordinator, f"smart_{field}")
+        self._smart = coordinator.smart
+        self._field = field
+        self._attr_name = name
+        self._attr_native_min_value = lo
+        self._attr_native_max_value = hi
+        self._attr_native_step = step
+        self._attr_native_unit_of_measurement = unit
+        if unit == "°C":
+            self._attr_device_class = NumberDeviceClass.TEMPERATURE
+            self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is not None and last.native_value is not None:
+            value = float(last.native_value)
+            if self._smart.rest_valid(self._field, value):
+                self._smart.set_rest(self._field, value)
+
+    @property
+    def native_value(self) -> float:
+        return getattr(self._smart.settings, self._field)
+
+    async def async_set_native_value(self, value: float) -> None:
+        if not self._smart.rest_valid(self._field, value):
+            raise ServiceValidationError(
+                "The mild point outdoor temperature must be higher than the cold point's."
+            )
+        self._smart.set_rest(self._field, value)
         self.async_write_ha_state()

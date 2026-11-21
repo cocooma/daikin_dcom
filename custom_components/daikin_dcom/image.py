@@ -1,7 +1,9 @@
 """Image entity: the smart heating curve drawn as SVG (no custom card needed).
 
 When a room correction is active, the curve shifted by that correction is
-drawn as a dashed line (what the unit actually gets), with a small legend.
+drawn as a dashed line (what the unit actually gets). When the compressor rest
+is on, its two-point rest curve is drawn dotted against a minutes scale on
+the right. A legend row below the chart names the lines.
 
 Show it with the built-in Picture entity card. The picture is redrawn when
 the curve, thresholds, window or operating point change.
@@ -21,8 +23,8 @@ from .const import DOMAIN
 from .coordinator import DcomCoordinator
 from .smart import LWT_FLOOR, curve_lwt
 
-W, H = 640, 360
-ML, MR, MT, MB = 48, 16, 16, 40  # margins
+W, H = 640, 404
+ML, MR, MT, MB = 48, 44, 16, 84  # margins (right: rest scale; bottom: axis title, 'now' row, legend row)
 X_MIN, X_MAX = -15, 20
 
 TEXT = "#9e9e9e"  # readable on light and dark themes
@@ -31,6 +33,7 @@ CURVE = "#ff9800"
 NOW = "#03a9f4"
 MILD = "rgba(255,193,7,0.12)"
 OFF = "rgba(158,158,158,0.18)"
+REST = "#26a69a"  # compressor rest curve (right-hand scale)
 
 
 async def async_setup_entry(
@@ -96,7 +99,7 @@ def render_curve_svg(smart) -> str:
         out.append(f'<line x1="{ML}" y1="{y(v):.1f}" x2="{ML + pw}" y2="{y(v):.1f}" stroke="{GRID}"/>')
         out.append(f'<text x="{ML - 6}" y="{y(v) + 4:.1f}" fill="{TEXT}" text-anchor="end">{v}</text>')
     out.append(
-        f'<text x="{ML + pw / 2:.1f}" y="{H - 6}" fill="{TEXT}" text-anchor="middle">'
+        f'<text x="{ML + pw / 2:.1f}" y="{MT + ph + 32}" fill="{TEXT}" text-anchor="middle">'
         "Outdoor temperature (°C)</text>"
     )
     out.append(
@@ -107,21 +110,60 @@ def render_curve_svg(smart) -> str:
     # curve
     line = " ".join(f"{x(t):.1f},{y(v):.1f}" for t, v in points)
     out.append(f'<polyline points="{line}" fill="none" stroke="{CURVE}" stroke-width="3"/>')
+    legend: list[tuple[str, str, str]] = []  # (dasharray, width, text)
     if corrected:
         dashed = " ".join(f"{x(t):.1f},{y(v):.1f}" for t, v in corrected)
         out.append(
             f'<polyline points="{dashed}" fill="none" stroke="{CURVE}" stroke-width="2" '
             'stroke-dasharray="7 5" opacity="0.85"/>'
         )
-        # legend, bottom left: the curve is high on the left, so this corner is free
-        lx, ly = ML + 12, MT + ph - 30
-        out.append(f'<line x1="{lx}" y1="{ly}" x2="{lx + 24}" y2="{ly}" stroke="{CURVE}" stroke-width="3"/>')
-        out.append(f'<text x="{lx + 32}" y="{ly + 4}" fill="{TEXT}">curve</text>')
-        out.append(
-            f'<line x1="{lx}" y1="{ly + 18}" x2="{lx + 24}" y2="{ly + 18}" stroke="{CURVE}" '
-            'stroke-width="2" stroke-dasharray="7 5"/>'
+        legend.append(("7 5", "2", f"with room correction {offset:+d} °C"))
+
+    # compressor rest curve on its own scale (minutes, right-hand axis)
+    if s.rest:
+        rest_pts = [
+            (X_MIN, s.rest_cold_min if s.rest_cold_out >= X_MIN else s.rest_cold_min),
+            (s.rest_cold_out, s.rest_cold_min),
+            (s.rest_mild_out, s.rest_mild_min),
+            (X_MAX, s.rest_mild_min),
+        ]
+        r_max = max(30, math.ceil((max(s.rest_cold_min, s.rest_mild_min) + 5) / 10) * 10)
+
+        def yr(m: float) -> float:
+            return MT + (r_max - m) / r_max * ph
+
+        rest_line = " ".join(
+            f"{x(t):.1f},{yr(m):.1f}"
+            for t, m in sorted(rest_pts)
         )
-        out.append(f'<text x="{lx + 32}" y="{ly + 22}" fill="{TEXT}">with room correction {offset:+d} °C</text>')
+        out.append(
+            f'<polyline points="{rest_line}" fill="none" stroke="{REST}" stroke-width="2" '
+            'stroke-dasharray="2 4" stroke-linecap="round"/>'
+        )
+        for m in range(0, r_max + 1, 10):
+            out.append(
+                f'<text x="{ML + pw + 6}" y="{yr(m) + 4:.1f}" fill="{REST}" text-anchor="start">{m}</text>'
+            )
+        out.append(
+            f'<text x="{W - 6}" y="{MT + ph / 2:.1f}" fill="{REST}" text-anchor="middle" '
+            f'transform="rotate(90 {W - 6} {MT + ph / 2:.1f})">Rest (min)</text>'
+        )
+        legend.append(("2 4", "2", "compressor rest (right scale)"))
+
+    # legend row below the chart (only when there is more than the curve)
+    if legend:
+        items = [("", "3", "curve")] + legend
+        lx, ly = ML, H - 10
+        for dash, width, text in items:
+            color = REST if text.startswith("compressor") else CURVE
+            dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+            out.append(
+                f'<line x1="{lx}" y1="{ly - 4}" x2="{lx + 24}" y2="{ly - 4}" stroke="{color}" '
+                f'stroke-width="{width}"{dash_attr} stroke-linecap="round"/>'
+            )
+            out.append(f'<text x="{lx + 30}" y="{ly}" fill="{TEXT}">{text}</text>')
+            lx += 30 + 7 * len(text) + 24
+
     for t, v in ((s.cold_out, s.cold_lwt), (s.warm_out, s.warm_lwt)):
         if X_MIN <= t <= X_MAX:
             out.append(f'<circle cx="{x(t):.1f}" cy="{y(v):.1f}" r="4" fill="{CURVE}"/>')
@@ -130,39 +172,20 @@ def render_curve_svg(smart) -> str:
                 f"{t:g}° → {v:g}°</text>"
             )
 
-    # operating point: averaged outdoor vs. target written to the unit
+    # operating point: averaged outdoor vs. target written to the unit.
+    # The dot sits on the chart; its text gets its own row below the axis title,
+    # because with several lines there is no reliably free spot inside the plot.
     if smart.outdoor_avg is not None and smart.target_lwt is not None:
         cx, cy = x(smart.outdoor_avg), y(smart.target_lwt)
         out.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="6" fill="{NOW}"/>')
-        label = f"now {smart.outdoor_avg:.1f}° → {smart.target_lwt}°"
+        label = f"now {smart.outdoor_avg:.1f} °C outside → {smart.target_lwt} °C water"
         if smart.room_offset:
             label += f" (room {smart.room_offset:+d})"
-        # The point sits on the dashed line when a room correction is active,
-        # otherwise on the curve. Lines fall to the right, so the free side is
-        # up-right above them and down-left below them. With a positive
-        # correction the solid curve is below the point (go above); with a
-        # negative one it is above (go below).
-        if offset:
-            above = offset > 0
-        else:
-            curve_here = (
-                smart.curve_value if smart.curve_value is not None else smart.target_lwt
-            )
-            above = smart.target_lwt >= curve_here
-        anchor = "start" if above else "end"
-        flipped = False
-        if anchor == "start" and cx > ML + pw * 0.75:
-            anchor, flipped = "end", True
-        elif anchor == "end" and cx < ML + pw * 0.35:
-            anchor, flipped = "start", True
-        dx = 10 if anchor == "start" else -10
-        if above:
-            dy = -24 if flipped else -10
-        else:
-            dy = 32 if flipped else 20
-        out.append(
-            f'<text x="{cx + dx:.1f}" y="{cy + dy:.1f}" fill="{NOW}" text-anchor="{anchor}">{label}</text>'
-        )
+        if s.rest:
+            label += f" · rest {int(smart.rest_time.total_seconds() // 60)} min"
+        ny = MT + ph + 52
+        out.append(f'<circle cx="{ML + 6}" cy="{ny - 4}" r="5" fill="{NOW}"/>')
+        out.append(f'<text x="{ML + 18}" y="{ny}" fill="{NOW}">{label}</text>')
 
     out.append("</svg>")
     return "".join(out)

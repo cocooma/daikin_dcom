@@ -38,7 +38,6 @@ from .const import (
     CONF_SMART_EARLY_SHORTFALL,
     CONF_SMART_EARLY_START,
     CONF_SMART_REST,
-    CONF_SMART_REST_MINUTES,
     ROOM_MODES,
     CONF_SMART_ROOM_TARGET,
     SMART_DEFAULTS,
@@ -211,9 +210,6 @@ class DcomOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SMART_REST, default=opts[CONF_SMART_REST]
                 ): selector.BooleanSelector(),
-                vol.Required(
-                    CONF_SMART_REST_MINUTES, default=opts[CONF_SMART_REST_MINUTES]
-                ): _num(5, 60, 5, "min"),
                 vol.Required(
                     CONF_SMART_ROOM_TARGET, default=opts[CONF_SMART_ROOM_TARGET]
                 ): _num(15, 28, 0.5),

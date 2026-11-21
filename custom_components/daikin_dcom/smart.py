@@ -52,6 +52,8 @@ from .const import (
     CONF_SMART_EARLY_MIN_RUN,
     CONF_SMART_EARLY_SHORTFALL,
     CONF_SMART_EARLY_START,
+    CONF_SMART_REST,
+    CONF_SMART_REST_MINUTES,
     CONF_SMART_MAX_LWT,
     CONF_SMART_MILD_TEMP,
     CONF_SMART_OFF_TEMP,
@@ -70,7 +72,9 @@ from .const import (
     H_OPERATION_MODE,
     H_SPACE_ONOFF,
     H_WEATHER_MODE,
+    I_COMPRESSOR,
     I_DEFROST,
+    I_THREE_WAY_VALVE,
     I_OPERATION_MODE,
     I_OUTSIDE_TEMP,
     RANGES,
@@ -101,6 +105,7 @@ STATUS_PAUSED_WARM = "paused_warm"
 STATUS_PAUSED_MILD = "paused_mild_outside_window"
 STATUS_PAUSED_ROOMS_OFF = "paused_rooms_off"
 STATUS_EARLY_START = "heating_early_start"
+STATUS_COMPRESSOR_REST = "compressor_rest"
 
 EARLY_STOP_BAND = 0.3  # degC: an early start ends once the coldest room is this close to target
 
@@ -129,6 +134,8 @@ class SmartSettings:
     early_shortfall: float
     early_delay: timedelta
     early_min_run: timedelta
+    rest: bool
+    rest_time: timedelta
 
     @classmethod
     def from_options(cls, options: dict[str, Any]) -> SmartSettings:
@@ -153,6 +160,8 @@ class SmartSettings:
             early_shortfall=float(o[CONF_SMART_EARLY_SHORTFALL]),
             early_delay=timedelta(minutes=float(o[CONF_SMART_EARLY_DELAY])),
             early_min_run=timedelta(minutes=float(o[CONF_SMART_EARLY_MIN_RUN])),
+            rest=bool(o[CONF_SMART_REST]),
+            rest_time=timedelta(minutes=float(o[CONF_SMART_REST_MINUTES])),
         )
 
 
@@ -225,6 +234,15 @@ class SmartHeatingController:
         self.early_room: str | None = None
         self._cold_since: datetime | None = None
         self._early_started: datetime | None = None
+        # compressor: start counting and rest after the unit's own stops
+        self._comp_prev: int | None = None
+        self._valve_prev: int | None = None
+        self._defrost_prev: int | None = None
+        self._comp_stop_at: datetime | None = None  # unit's own stop, not yet handled
+        self.rest_until: datetime | None = None
+        self.starts_today = 0
+        self.heating_starts_today = 0
+        self._starts_day = None
         self._paused_reason: str | None = None
         self.status = STATUS_DISABLED
         self.target_lwt: int | None = None
@@ -259,6 +277,11 @@ class SmartHeatingController:
         self.room_offset = int(data.get("room_offset", 0))
         prev = data.get("previous_weather_mode")
         self.previous_weather_mode = None if prev is None else int(prev)
+        starts = data.get("starts") or {}
+        if starts.get("day") == dt_util.as_local(dt_util.utcnow()).date().isoformat():
+            self._starts_day = dt_util.as_local(dt_util.utcnow()).date()
+            self.starts_today = int(starts.get("all", 0))
+            self.heating_starts_today = int(starts.get("heating", 0))
         # no immediate evaluation: the window time / switch entities restore
         # after this one. The next poll or minute tick evaluates.
         self._notify()
@@ -269,6 +292,11 @@ class SmartHeatingController:
             "paused_by_us": self.paused_by_us,
             "room_offset": self.room_offset,
             "previous_weather_mode": self.previous_weather_mode,
+            "starts": {
+                "day": None if self._starts_day is None else self._starts_day.isoformat(),
+                "all": self.starts_today,
+                "heating": self.heating_starts_today,
+            },
         }
 
     # --- enable / disable --------------------------------------------------
@@ -302,10 +330,63 @@ class SmartHeatingController:
     # --- evaluation --------------------------------------------------------
     @callback
     def _schedule(self) -> None:
+        self._track_compressor(dt_util.utcnow())
         if self.enabled and not self._lock.locked():
             self.hass.async_create_task(self._async_evaluate())
         else:
             self._notify()
+
+    def _track_compressor(self, now: datetime) -> None:
+        """Count compressor starts and note the unit's own space heating stops.
+
+        A stop counts for the rest only when it happens in space heating: not
+        while producing hot water or defrosting (now or on the previous
+        reading), and not while the controller has paused heating itself.
+        """
+        c = self.coordinator
+        comp = c.value("i", I_COMPRESSOR)
+        valve = c.value("i", I_THREE_WAY_VALVE)
+        defrost = c.value("i", I_DEFROST)
+        if comp is None:
+            return
+        today = dt_util.as_local(now).date()
+        if self._starts_day != today:
+            self._starts_day = today
+            self.starts_today = 0
+            self.heating_starts_today = 0
+        prev = self._comp_prev
+        if prev == 0 and comp == 1:
+            self.starts_today += 1
+            if valve != 1:
+                self.heating_starts_today += 1
+        elif prev == 1 and comp == 0:
+            in_dhw = 1 in (valve, self._valve_prev)
+            in_defrost = 1 in (defrost, self._defrost_prev)
+            heating_on = c.value("h", H_SPACE_ONOFF) == 1
+            if heating_on and not in_dhw and not in_defrost and not self.paused_by_us:
+                self._comp_stop_at = now
+        self._comp_prev, self._valve_prev, self._defrost_prev = comp, valve, defrost
+
+    def _update_rest(self, now: datetime) -> bool:
+        """Start, keep or end the compressor rest; True while resting."""
+        s = self.settings
+        c = self.coordinator
+        stop, self._comp_stop_at = self._comp_stop_at, None
+        if stop is not None and now - stop > timedelta(minutes=5):
+            stop = None  # stale: noted while the controller wasn't evaluating
+        if not s.rest:
+            self.rest_until = None
+            return False
+        if stop is not None and c.value("h", H_SPACE_ONOFF) == 1:
+            self.rest_until = stop + s.rest_time
+        if self.rest_until is None:
+            return False
+        if now >= self.rest_until or c.value("i", I_COMPRESSOR) == 1:
+            # rest over, or the water fell below 25 °C and the unit restarted
+            self.rest_until = None
+            self._last_setpoint_write = None  # put the curve back straight away
+            return False
+        return True
 
     def _update_outdoor(self, now: datetime) -> None:
         raw = self.coordinator.temp("i", I_OUTSIDE_TEMP)
@@ -521,9 +602,14 @@ class SmartHeatingController:
         target = round(self.curve_value + self.room_offset)
         target = int(max(LWT_FLOOR, min(s.max_lwt, target)))
         self.target_lwt = target
+        resting = self._update_rest(now)
+        if resting:
+            # keep space heating (and the pump) on, but below the water temperature
+            target = LWT_FLOOR
         current = c.value("h", H_LWT_HEAT_SP)
         due = (
-            self._last_setpoint_write is None
+            resting
+            or self._last_setpoint_write is None
             or now - self._last_setpoint_write >= SETPOINT_MIN_INTERVAL
             or current is None
             or abs(target - current) >= 2
@@ -561,6 +647,8 @@ class SmartHeatingController:
                 "warm": STATUS_PAUSED_WARM,
                 "rooms_off": STATUS_PAUSED_ROOMS_OFF,
             }.get(self._paused_reason, STATUS_PAUSED_MILD)
+        elif self.rest_until is not None:
+            self.status = STATUS_COMPRESSOR_REST
         elif self.early_active:
             self.status = STATUS_EARLY_START
         else:
@@ -627,6 +715,9 @@ class SmartHeatingController:
             "room_mode": s.room_mode if s.room_sensors else None,
             "room_error": None if self.room_error is None else round(self.room_error, 1),
             "room_driver": self.room_driver,
+            "compressor_rest_until": None
+            if self.rest_until is None
+            else dt_util.as_local(self.rest_until).strftime("%H:%M"),
             "early_start": s.early_start,
             "early_start_room": self.early_room,
             "cold_room_since": None

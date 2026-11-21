@@ -56,11 +56,11 @@ design decisions and working conventions behind it.
 | `coordinator.py` | Polls documented register blocks (`READ_BLOCKS` in `const.py`); `value`/`temp`/`text` helpers; `async_write` (optimistic) |
 | `const.py` | Register numbers, ranges, option keys, `SMART_DEFAULTS` |
 | `climate.py` | Space heating/cooling climate (regs 3/4 + setpoint or weather offset) and DHW climate |
-| `smart.py` | `SmartHeatingController`: HA-side curve, mild-day window, warm cut-off, room correction |
+| `smart.py` | `SmartHeatingController`: HA-side curve, mild-day window, warm cut-off, room correction, early start, compressor rest |
 | `image.py` | `render_curve_svg()` + image entity drawing the curve and operating point |
 | `number.py` | Weather offsets (54/55) and the four smart heating curve point numbers |
 | `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, quiet mode |
-| `sensor.py` | Temperatures, flow, error codes, smart target LWT and status sensors |
+| `sensor.py` | Temperatures, flow, error codes, smart target LWT, status and compressor starts sensors |
 | `config_flow.py` | Setup and options (control mode, poll interval, max LWT, mild/off thresholds, room sensor) |
 
 `coordinator.smart` holds the controller; it is created in `__init__.py` before the platforms are set up.
@@ -80,6 +80,12 @@ design decisions and working conventions behind it.
 * Early start (option, off by default): during a mild-day pause outside the window, the coldest counted room
   ≥ shortfall (1.0 °C) below target for a delay (30 min) resumes heating (`heating_early_start`); it ends when
   that room is within 0.3 °C and the minimum early run (45 min) has passed. Not applied to warm or rooms-off pauses.
+* Compressor rest (option, on by default, 20 min): a compressor 1→0 transition (input 31) while space heating
+  is on, not in DHW (input 37) or defrost (input 35), now or on the previous reading, and not paused by the
+  controller, starts a rest. Space heating stays on (so the pump keeps running with [F-0D] = 0) and reg 1 is set
+  to 25 °C; the curve target is written back when the rest ends or the unit restarts by itself. Stops older than
+  5 min when handled are ignored. Starts are counted in `_track_compressor`, called from `_schedule` on every
+  update even when the controller is disabled; counts persist in the switch's restore data.
 * Runtime state (enabled, paused_by_us, room offset, previous mode) persists through the switch's restore
   data. Window times/switch and curve points are their own restore entities; restoring them must not
   trigger writes (`set_curve(..., evaluate=False)`, `restore()` only notifies).

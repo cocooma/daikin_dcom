@@ -32,6 +32,7 @@ from .coordinator import DcomCoordinator
 from .entity import DcomEntity
 from .smart import (
     STATUS_ACTIVE,
+    STATUS_COMPRESSOR_REST,
     STATUS_COOLING,
     STATUS_DEFROST,
     STATUS_DISABLED,
@@ -107,6 +108,7 @@ async def async_setup_entry(
             *(DcomSensor(coordinator, d) for d in SENSORS),
             DcomSmartTargetSensor(coordinator),
             DcomSmartStatusSensor(coordinator),
+            DcomCompressorStartsSensor(coordinator),
         ]
     )
 
@@ -178,6 +180,7 @@ class DcomSmartStatusSensor(_SmartSensorBase):
         STATUS_PAUSED_WARM,
         STATUS_PAUSED_MILD,
         STATUS_PAUSED_ROOMS_OFF,
+        STATUS_COMPRESSOR_REST,
     ]
 
     def __init__(self, coordinator: DcomCoordinator) -> None:
@@ -187,3 +190,27 @@ class DcomSmartStatusSensor(_SmartSensorBase):
     def native_value(self):
         return self.coordinator.smart.status
 
+
+
+class DcomCompressorStartsSensor(_SmartSensorBase):
+    """Compressor starts since midnight (counted whether or not smart heating is on)."""
+
+    _attr_name = "Compressor starts today"
+    _attr_icon = "mdi:counter"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator: DcomCoordinator) -> None:
+        super().__init__(coordinator, "compressor_starts_today")
+
+    @property
+    def native_value(self):
+        return self.coordinator.smart.starts_today
+
+    @property
+    def extra_state_attributes(self):
+        smart = self.coordinator.smart
+        return {
+            "space_heating_starts": smart.heating_starts_today,
+            "hot_water_starts": smart.starts_today - smart.heating_starts_today,
+            "compressor_rest_until": smart.attributes.get("compressor_rest_until"),
+        }

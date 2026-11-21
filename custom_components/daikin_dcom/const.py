@@ -147,3 +147,6 @@ SMART_DEFAULTS = {
     CONF_SMART_REST: True,
     CONF_SMART_REST_MINUTES: 20,
 }
+
+# --- COP (needs an external electricity sensor; the DCOM has no power registers) ---
+CONF_COP_SENSOR = "cop_electricity_sensor"  # power (W/kW) or energy (Wh/kWh/MWh) sensor

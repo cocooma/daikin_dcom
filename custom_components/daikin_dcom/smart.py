@@ -23,7 +23,7 @@ Rules
 
 The curve points are set at runtime through the "Heating curve ..." number
 entities (initial values from the integration options); thresholds and the
-room sensor live in the integration options.
+room sensors / thermostats live in the integration options.
 The mild-day window (start, end, on/off) is set at runtime through the
 "Smart heating window start/end" time entities and the "Smart heating
 mild-day window" switch, which restore their own state. Runtime state (enabled, paused-by-us, room offset, previous mode)
@@ -52,7 +52,11 @@ from .const import (
     CONF_SMART_MILD_TEMP,
     CONF_SMART_OFF_TEMP,
     CONF_SMART_ROOM_MAX_OFFSET,
+    CONF_SMART_ROOM_MODE,
     CONF_SMART_ROOM_SENSOR,
+    CONF_SMART_ROOMS_OFF_PAUSE,
+    ROOM_MODE_AVERAGE,
+    ROOM_MODE_WARMEST,
     CONF_SMART_ROOM_TARGET,
     CONF_SMART_WARM_LWT,
     CONF_SMART_WARM_OUT,
@@ -91,6 +95,10 @@ STATUS_DEFROST = "defrost"
 STATUS_ACTIVE = "heating"
 STATUS_PAUSED_WARM = "paused_warm"
 STATUS_PAUSED_MILD = "paused_mild_outside_window"
+STATUS_PAUSED_ROOMS_OFF = "paused_rooms_off"
+
+# thermostat modes that count as "on" for heating
+HEAT_MODES = ("heat", "auto", "heat_cool")
 
 
 @dataclass
@@ -105,9 +113,11 @@ class SmartSettings:
     window_start: time
     window_end: time
     window_enabled: bool
-    room_sensor: str | None
+    room_sensors: list[str]
     room_target: float
     room_max_offset: int
+    room_mode: str
+    rooms_off_pause: bool
 
     @classmethod
     def from_options(cls, options: dict[str, Any]) -> SmartSettings:
@@ -123,10 +133,28 @@ class SmartSettings:
             window_start=_parse_time(o[CONF_SMART_WINDOW_START]),
             window_end=_parse_time(o[CONF_SMART_WINDOW_END]),
             window_enabled=True,
-            room_sensor=o.get(CONF_SMART_ROOM_SENSOR) or None,
+            room_sensors=_as_list(o.get(CONF_SMART_ROOM_SENSOR)),
             room_target=float(o[CONF_SMART_ROOM_TARGET]),
             room_max_offset=int(o[CONF_SMART_ROOM_MAX_OFFSET]),
+            room_mode=str(o[CONF_SMART_ROOM_MODE]),
+            rooms_off_pause=bool(o[CONF_SMART_ROOMS_OFF_PAUSE]),
         )
+
+
+def _as_list(value: Any) -> list[str]:
+    """Room entities: a list now, a single id (or "") in older options."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [v for v in value if v]
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_time(value: Any) -> time:
@@ -174,6 +202,9 @@ class SmartHeatingController:
         self._last_setpoint_write: datetime | None = None
         self._last_onoff_change: datetime | None = None
         self._last_room_step: datetime | None = None
+        self.rooms: list[dict[str, Any]] = []
+        self.room_error: float | None = None
+        self.room_driver: str | None = None
         self._paused_reason: str | None = None
         self.status = STATUS_DISABLED
         self.target_lwt: int | None = None
@@ -270,25 +301,78 @@ class SmartHeatingController:
             self.outdoor_avg += alpha * (raw - self.outdoor_avg)
         self._last_sample = now
 
-    def _room_temperature(self) -> float | None:
-        if not self.settings.room_sensor:
-            return None
-        state = self.hass.states.get(self.settings.room_sensor)
-        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            return None
-        try:
-            return float(state.state)
-        except ValueError:
-            return None
+    def _read_rooms(self) -> list[dict[str, Any]]:
+        """Current temperature, target and on/off of every selected room.
+
+        sensor.*  : temperature from the state, target from the options,
+                    always counted as on.
+        climate.* : current_temperature / temperature attributes (falls back
+                    to target_temp_low, then the options target); on when its
+                    mode is heat, auto or heat_cool.
+        """
+        s = self.settings
+        rooms: list[dict[str, Any]] = []
+        for entity_id in s.room_sensors:
+            state = self.hass.states.get(entity_id)
+            room: dict[str, Any] = {"entity": entity_id}
+            room["thermostat"] = entity_id.startswith("climate.")
+            if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                room.update(available=False, on=False, temperature=None, target=None)
+            elif room["thermostat"]:
+                attrs = state.attributes
+                target = _float(attrs.get("temperature"))
+                if target is None:
+                    target = _float(attrs.get("target_temp_low"))
+                room.update(
+                    available=True,
+                    on=state.state in HEAT_MODES,
+                    temperature=_float(attrs.get("current_temperature")),
+                    target=s.room_target if target is None else target,
+                )
+            else:
+                room.update(
+                    available=True,
+                    on=True,
+                    temperature=_float(state.state),
+                    target=s.room_target,
+                )
+            rooms.append(room)
+        return rooms
+
+    def _aggregate_room_error(self) -> None:
+        """target - temperature over the rooms that count, per room mode."""
+        usable = [
+            r
+            for r in self.rooms
+            if r["available"] and r["on"]
+            and r["temperature"] is not None and r["target"] is not None
+        ]
+        if not usable:
+            self.room_error = None
+            self.room_driver = None
+            return
+        errors = {r["entity"]: r["target"] - r["temperature"] for r in usable}
+        mode = self.settings.room_mode
+        if mode == ROOM_MODE_AVERAGE:
+            self.room_error = sum(errors.values()) / len(errors)
+            self.room_driver = None
+        else:
+            pick = min if mode == ROOM_MODE_WARMEST else max  # coldest = largest shortfall
+            self.room_driver = pick(errors, key=errors.get)
+            self.room_error = errors[self.room_driver]
+
+    def _all_thermostats_off(self) -> bool:
+        """True if at least one selected thermostat is readable and none is on."""
+        stats = [r for r in self.rooms if r["thermostat"] and r["available"]]
+        return bool(stats) and not any(r["on"] for r in stats)
 
     def _update_room_offset(self, now: datetime) -> None:
         s = self.settings
-        room = self._room_temperature()
-        if room is None:
-            return
+        if self.room_error is None:
+            return  # no usable room: keep the correction where it is
         if self._last_room_step and now - self._last_room_step < ROOM_STEP_INTERVAL:
             return
-        error = s.room_target - room
+        error = self.room_error
         step = 0
         if error >= ROOM_DEADBAND:
             step = 1
@@ -304,6 +388,8 @@ class SmartHeatingController:
         s = self.settings
         t = self.outdoor_avg
         reason = self._paused_reason
+        if s.rooms_off_pause and self._all_thermostats_off():
+            return False, "rooms_off"
         warm_limit = s.off_temp - (HYSTERESIS if reason == "warm" else 0)
         if t >= warm_limit:
             return False, "warm"
@@ -358,6 +444,8 @@ class SmartHeatingController:
 
         # 2. setpoint from curve + room offset
         s = self.settings
+        self.rooms = self._read_rooms()
+        self._aggregate_room_error()
         self._update_room_offset(now)
         self.curve_value = curve_lwt(s, self.outdoor_avg)
         target = round(self.curve_value + self.room_offset)
@@ -395,9 +483,10 @@ class SmartHeatingController:
             self._paused_reason = reason
 
         if self.paused_by_us:
-            self.status = (
-                STATUS_PAUSED_WARM if self._paused_reason == "warm" else STATUS_PAUSED_MILD
-            )
+            self.status = {
+                "warm": STATUS_PAUSED_WARM,
+                "rooms_off": STATUS_PAUSED_ROOMS_OFF,
+            }.get(self._paused_reason, STATUS_PAUSED_MILD)
         else:
             self.status = STATUS_ACTIVE
 
@@ -459,8 +548,18 @@ class SmartHeatingController:
             else round(self.outdoor_avg, 1),
             "curve_lwt": None if self.curve_value is None else round(self.curve_value, 1),
             "room_offset": self.room_offset,
-            "room_sensor": s.room_sensor,
-            "room_target": s.room_target if s.room_sensor else None,
+            "room_mode": s.room_mode if s.room_sensors else None,
+            "room_error": None if self.room_error is None else round(self.room_error, 1),
+            "room_driver": self.room_driver,
+            "rooms": [
+                {
+                    "entity": r["entity"],
+                    "temperature": r["temperature"],
+                    "target": r["target"],
+                    "on": r["on"],
+                }
+                for r in self.rooms
+            ],
             "paused_by_controller": self.paused_by_us,
             "curve": f"{s.cold_out:g}°C→{s.cold_lwt:g}°C, {s.warm_out:g}°C→{s.warm_lwt:g}°C",
             "mild_temp": s.mild_temp,

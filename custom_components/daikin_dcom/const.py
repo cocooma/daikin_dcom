@@ -108,9 +108,16 @@ CONF_SMART_MILD_TEMP = "smart_mild_temp"
 CONF_SMART_OFF_TEMP = "smart_off_temp"
 CONF_SMART_WINDOW_START = "smart_window_start"
 CONF_SMART_WINDOW_END = "smart_window_end"
-CONF_SMART_ROOM_SENSOR = "smart_room_sensor"
+CONF_SMART_ROOM_SENSOR = "smart_room_sensor"  # list of sensor / climate entity ids (was one id)
 CONF_SMART_ROOM_TARGET = "smart_room_target"
 CONF_SMART_ROOM_MAX_OFFSET = "smart_room_max_offset"
+CONF_SMART_ROOM_MODE = "smart_room_mode"
+CONF_SMART_ROOMS_OFF_PAUSE = "smart_rooms_off_pause"
+
+ROOM_MODE_COLDEST = "coldest"
+ROOM_MODE_AVERAGE = "average"
+ROOM_MODE_WARMEST = "warmest"
+ROOM_MODES = (ROOM_MODE_COLDEST, ROOM_MODE_AVERAGE, ROOM_MODE_WARMEST)
 
 SMART_DEFAULTS = {
     CONF_SMART_COLD_OUT: -5.0,  # outdoor degC of the cold curve point
@@ -122,7 +129,9 @@ SMART_DEFAULTS = {
     CONF_SMART_OFF_TEMP: 16.0,  # above: no space heating
     CONF_SMART_WINDOW_START: "11:00:00",
     CONF_SMART_WINDOW_END: "17:00:00",
-    CONF_SMART_ROOM_SENSOR: "",
+    CONF_SMART_ROOM_SENSOR: [],
     CONF_SMART_ROOM_TARGET: 22.0,
     CONF_SMART_ROOM_MAX_OFFSET: 3,
+    CONF_SMART_ROOM_MODE: "coldest",  # which room drives the correction
+    CONF_SMART_ROOMS_OFF_PAUSE: True,  # pause heating when all thermostats are off
 }

@@ -313,6 +313,16 @@ length is the `compressor_rest_minutes` attribute of **Smart heating target LWT*
 `last_compressor_stop` there shows the last stop and what was done with it (e.g. `21:30 rest`,
 `21:52 ignored (hot water)`, `ignored (paused by controller)`, `ignored (smart heating off)`).
 
+Every setpoint change made by the rest is written to the **Logbook** (and the **Activity** of
+**Smart heating status**), e.g.:
+
+* `Compressor stopped at 21:30: resting 23 min until 21:53; LWT target lowered from 29 °C to 25 °C`
+* `Compressor rest over; LWT target back to 29 °C`
+* `Unit restarted the compressor during the rest (water below 25 °C); LWT target back to 29 °C`
+* `Compressor rest switched off; LWT target back to 29 °C`
+
+The same lines go to the Home Assistant log at info level (`custom_components.daikin_dcom.smart`).
+
 If the target doesn't drop to 25 °C during a rest, check the unit's minimum heating LWT **[9-01]**: the DCOM
 clamps written setpoints to the unit's configured range, so a minimum above 25 °C is written instead. Compare days with the rest
 on and off to see its effect.
@@ -331,6 +341,7 @@ on and off to see its effect.
 * Thresholds use 0.5 °C hysteresis. The controller keeps heating on for at least 30 min and off for at least
   20 min, and writes the setpoint at most every 10 min (immediately if it changes by 2 °C or more).
 * It only resumes heating it paused itself: if you switch space heating off, it stays off.
+  If you switch heating back **on** while it was paused, the controller notices and carries on managing it.
 * It does nothing in cooling mode or during defrost.
 * While it is on, setpoint and weather mode changes made elsewhere (climate entity, select, Daikin user
   interface) are overwritten. Switch it off to take manual control.

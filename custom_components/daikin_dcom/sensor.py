@@ -164,7 +164,15 @@ class DcomSmartTargetSensor(_SmartSensorBase):
 
 
 class DcomSmartStatusSensor(_SmartSensorBase):
-    """What the smart heating controller is doing."""
+    """What the smart heating controller is doing.
+
+    Logbook entries (compressor rest start / end) are attached to this entity,
+    so they show in its Activity.
+    """
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.coordinator.smart.status_entity_id = self.entity_id
 
     _attr_name = "Smart heating status"
     _attr_translation_key = "smart_status"

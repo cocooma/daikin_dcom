@@ -26,16 +26,12 @@ from .const import (
     FRAMING_RTU,
     FRAMING_TCP,
     I_UNIT_ERROR,
-    CONF_SMART_COLD_LWT,
-    CONF_SMART_COLD_OUT,
     CONF_SMART_MAX_LWT,
     CONF_SMART_MILD_TEMP,
     CONF_SMART_OFF_TEMP,
     CONF_SMART_ROOM_MAX_OFFSET,
     CONF_SMART_ROOM_SENSOR,
     CONF_SMART_ROOM_TARGET,
-    CONF_SMART_WARM_LWT,
-    CONF_SMART_WARM_OUT,
     SMART_DEFAULTS,
 )
 from .modbus_client import DcomClient, DcomError
@@ -134,9 +130,7 @@ class DcomOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input[CONF_SMART_WARM_OUT] <= user_input[CONF_SMART_COLD_OUT]:
-                errors[CONF_SMART_WARM_OUT] = "warm_below_cold"
-            elif user_input[CONF_SMART_OFF_TEMP] < user_input[CONF_SMART_MILD_TEMP]:
+            if user_input[CONF_SMART_OFF_TEMP] < user_input[CONF_SMART_MILD_TEMP]:
                 errors[CONF_SMART_OFF_TEMP] = "off_below_mild"
             else:
                 user_input.setdefault(CONF_SMART_ROOM_SENSOR, "")
@@ -157,18 +151,6 @@ class DcomOptionsFlow(OptionsFlow):
                     int, vol.Range(min=10, max=600)
                 ),
                 # --- smart heating control ---
-                vol.Required(
-                    CONF_SMART_COLD_OUT, default=opts[CONF_SMART_COLD_OUT]
-                ): _num(-25, 10, 0.5),
-                vol.Required(
-                    CONF_SMART_COLD_LWT, default=opts[CONF_SMART_COLD_LWT]
-                ): _num(25, 55, 0.5),
-                vol.Required(
-                    CONF_SMART_WARM_OUT, default=opts[CONF_SMART_WARM_OUT]
-                ): _num(0, 25, 0.5),
-                vol.Required(
-                    CONF_SMART_WARM_LWT, default=opts[CONF_SMART_WARM_LWT]
-                ): _num(25, 55, 0.5),
                 vol.Required(
                     CONF_SMART_MAX_LWT, default=opts[CONF_SMART_MAX_LWT]
                 ): _num(25, 55, 1),

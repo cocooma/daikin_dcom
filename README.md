@@ -27,7 +27,7 @@ Then: Settings → Devices & services → Add integration → *Daikin Altherma 3
 The DCOM's RS485 side is fixed at 9600 baud, 8N1.
 
 **Options** (Configure on the integration): temperature control, polling interval (10–600 s, default 30 s) and
-the smart heating settings described below. Saving the options reloads the integration.
+the smart heating thresholds and room sensor described below. Saving the options reloads the integration.
 
 ## Entities
 
@@ -65,7 +65,7 @@ off / heat = DHW reheat (reg 12), target = DHW reheat setpoint 30–60 °C (reg 
 | Switch | Quiet mode (reg 9) |
 | Select | Weather dependent mode (reg 53): fixed, weather dependent, fixed + scheduled, weather dependent + scheduled |
 | Number | Weather dependent heating / cooling LWT offset (regs 54 / 55, −10 to +10 °C) |
-| Smart heating | See the next section: control switch, mild-day window switch and times, target LWT and status sensors, heating curve image |
+| Smart heating | See the next section: control switch, heating curve points, mild-day window switch and times, target LWT and status sensors, heating curve image |
 
 ## Smart heating control (optional)
 
@@ -85,12 +85,28 @@ Turn it on with the **Smart heating control** switch. While it is on and the uni
 
 | Option | Default | Meaning |
 |---|---|---|
-| Cold point | −5 °C → 34 °C | Curve point; the LWT stays flat below it |
-| Warm point | 15 °C → 26 °C | Curve point; the LWT stays flat above it (reg 1 minimum is 25 °C) |
 | Maximum LWT | 40 °C | Safety cap |
 | Mild day above | 12 °C | Above this, heat only inside the mild-day window |
 | No space heating above | 16 °C | Heating paused |
 | Room sensor / target / max correction | – / 22 °C / 3 °C | Optional: ±1 °C LWT step every 45 min while the room is 0.5 °C or more off target |
+
+### Heating curve (dashboard)
+
+The two curve points are number entities, so the curve can be tuned from the dashboard. Changes apply
+immediately (the new setpoint is written straight away while smart heating is on), are redrawn in the
+**Heating curve** image and are kept across restarts.
+
+| Entity | Default | Range | Meaning |
+|---|---|---|---|
+| Heating curve cold point outdoor | −5 °C | −25 to 10 °C | Outdoor temperature of the cold point; the LWT stays flat below it |
+| Heating curve cold point LWT | 34 °C | 25 to 55 °C | Leaving water at the cold point |
+| Heating curve warm point outdoor | 15 °C | 0 to 25 °C | Outdoor temperature of the warm point; the LWT stays flat above it |
+| Heating curve warm point LWT | 26 °C | 25 to 55 °C | Leaving water at the warm point (reg 1 minimum is 25 °C) |
+
+The warm point's outdoor temperature must stay above the cold point's; other values are refused.
+Tuning: if rooms are too cold everywhere, raise both LWT points by 1 °C; if only on cold days, raise the
+cold point LWT; if only on mild days, raise the warm point LWT. Wait a day between changes with underfloor
+heating.
 
 ### Mild-day window (dashboard)
 

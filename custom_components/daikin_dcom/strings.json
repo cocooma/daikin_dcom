@@ -30,9 +30,11 @@
           "smart_max_lwt": "Smart heating: maximum leaving water",
           "smart_mild_temp": "Smart heating: mild day above (heat only inside the window)",
           "smart_off_temp": "Smart heating: no space heating above",
-          "smart_room_sensor": "Smart heating: room temperature sensor (optional)",
-          "smart_room_target": "Smart heating: room target temperature",
-          "smart_room_max_offset": "Smart heating: maximum room correction (°C)"
+          "smart_room_sensor": "Smart heating: room temperature sensors and/or thermostats (optional)",
+          "smart_room_target": "Smart heating: room target (for plain sensors; thermostats use their own)",
+          "smart_room_max_offset": "Smart heating: maximum room correction (°C)",
+          "smart_room_mode": "Smart heating: room that drives the correction",
+          "smart_rooms_off_pause": "Smart heating: pause heating when all selected thermostats are off"
         },
         "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The heating curve points and the mild-day window are set on the dashboard with the 'Heating curve ...' and 'Smart heating window ...' entities."
       }
@@ -53,6 +55,13 @@
         "lwt": "Leaving water temperature (registers 1/2)",
         "room": "Room thermostat (registers 6/7)"
       }
+    },
+    "room_mode": {
+      "options": {
+        "coldest": "Coldest room (furthest below its target)",
+        "average": "Average of all rooms",
+        "warmest": "Warmest room (least below its target)"
+      }
     }
   },
   "entity": {
@@ -66,7 +75,8 @@
           "defrost": "Defrost",
           "heating": "Heating",
           "paused_warm": "Paused (warm)",
-          "paused_mild_outside_window": "Paused (mild, outside window)"
+          "paused_mild_outside_window": "Paused (mild, outside window)",
+          "paused_rooms_off": "Paused (all thermostats off)"
         }
       }
     }

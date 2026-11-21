@@ -36,6 +36,7 @@ from .smart import (
     STATUS_DEFROST,
     STATUS_DISABLED,
     STATUS_PAUSED_MILD,
+    STATUS_PAUSED_ROOMS_OFF,
     STATUS_PAUSED_WARM,
     STATUS_USER_OFF,
     STATUS_WAITING,
@@ -174,6 +175,7 @@ class DcomSmartStatusSensor(_SmartSensorBase):
         STATUS_ACTIVE,
         STATUS_PAUSED_WARM,
         STATUS_PAUSED_MILD,
+        STATUS_PAUSED_ROOMS_OFF,
     ]
 
     def __init__(self, coordinator: DcomCoordinator) -> None:

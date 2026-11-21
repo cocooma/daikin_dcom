@@ -30,7 +30,10 @@ from .const import (
     CONF_SMART_MILD_TEMP,
     CONF_SMART_OFF_TEMP,
     CONF_SMART_ROOM_MAX_OFFSET,
+    CONF_SMART_ROOM_MODE,
     CONF_SMART_ROOM_SENSOR,
+    CONF_SMART_ROOMS_OFF_PAUSE,
+    ROOM_MODES,
     CONF_SMART_ROOM_TARGET,
     SMART_DEFAULTS,
 )
@@ -47,6 +50,13 @@ def _num(lo: float, hi: float, step: float, unit: str = "°C") -> selector.Numbe
             mode=selector.NumberSelectorMode.BOX,
         )
     )
+
+
+def _room_list(value) -> list[str]:
+    """Room entities as a list (older options stored one id or "")."""
+    if not value:
+        return []
+    return [value] if isinstance(value, str) else list(value)
 
 
 def _select(options: list[str], key: str) -> selector.SelectSelector:
@@ -133,7 +143,7 @@ class DcomOptionsFlow(OptionsFlow):
             if user_input[CONF_SMART_OFF_TEMP] < user_input[CONF_SMART_MILD_TEMP]:
                 errors[CONF_SMART_OFF_TEMP] = "off_below_mild"
             else:
-                user_input.setdefault(CONF_SMART_ROOM_SENSOR, "")
+                user_input.setdefault(CONF_SMART_ROOM_SENSOR, [])
                 return self.async_create_entry(data=user_input)
 
         entry = self.config_entry
@@ -162,12 +172,24 @@ class DcomOptionsFlow(OptionsFlow):
                 ): _num(5, 30, 0.5),
                 vol.Optional(
                     CONF_SMART_ROOM_SENSOR,
-                    description={"suggested_value": opts[CONF_SMART_ROOM_SENSOR] or None},
+                    description={"suggested_value": _room_list(opts[CONF_SMART_ROOM_SENSOR])},
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(
-                        domain="sensor", device_class="temperature"
+                        multiple=True,
+                        filter=[
+                            selector.EntityFilterSelectorConfig(
+                                domain="sensor", device_class="temperature"
+                            ),
+                            selector.EntityFilterSelectorConfig(domain="climate"),
+                        ],
                     )
                 ),
+                vol.Required(
+                    CONF_SMART_ROOM_MODE, default=opts[CONF_SMART_ROOM_MODE]
+                ): _select(list(ROOM_MODES), "room_mode"),
+                vol.Required(
+                    CONF_SMART_ROOMS_OFF_PAUSE, default=opts[CONF_SMART_ROOMS_OFF_PAUSE]
+                ): selector.BooleanSelector(),
                 vol.Required(
                     CONF_SMART_ROOM_TARGET, default=opts[CONF_SMART_ROOM_TARGET]
                 ): _num(15, 28, 0.5),

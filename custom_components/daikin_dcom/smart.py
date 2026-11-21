@@ -245,6 +245,7 @@ class SmartHeatingController:
         self._valve_prev: int | None = None
         self._defrost_prev: int | None = None
         self._comp_stop_at: datetime | None = None  # unit's own stop, not yet handled
+        self.last_stop: tuple[datetime, str] | None = None  # diagnostics
         self.rest_until: datetime | None = None
         self.starts_today = 0
         self.heating_starts_today = 0
@@ -346,8 +347,11 @@ class SmartHeatingController:
         """Count compressor starts and note the unit's own space heating stops.
 
         A stop counts for the rest only when it happens in space heating: not
-        while producing hot water or defrosting (now or on the previous
-        reading), and not while the controller has paused heating itself.
+        while producing hot water (now or on the previous reading), not while
+        space heating is off and not while the controller has paused heating
+        itself. Input 35 is "defrost / startup": it is also set while the
+        compressor starts up, so it must not exclude stops - a short run that
+        ends during startup is exactly the stop the rest is for.
         """
         c = self.coordinator
         comp = c.value("i", I_COMPRESSOR)
@@ -367,10 +371,21 @@ class SmartHeatingController:
                 self.heating_starts_today += 1
         elif prev == 1 and comp == 0:
             in_dhw = 1 in (valve, self._valve_prev)
-            in_defrost = 1 in (defrost, self._defrost_prev)
             heating_on = c.value("h", H_SPACE_ONOFF) == 1
-            if heating_on and not in_dhw and not in_defrost and not self.paused_by_us:
+            if in_dhw:
+                outcome = "ignored (hot water)"
+            elif not heating_on:
+                outcome = "ignored (space heating off)"
+            elif self.paused_by_us:
+                outcome = "ignored (paused by controller)"
+            elif not self.settings.rest:
+                outcome = "ignored (rest switched off)"
+            else:
+                outcome = "rest"
                 self._comp_stop_at = now
+            if not self.enabled and outcome == "rest":
+                outcome = "ignored (smart heating off)"
+            self.last_stop = (now, outcome)
         self._comp_prev, self._valve_prev, self._defrost_prev = comp, valve, defrost
 
     def _update_rest(self, now: datetime) -> bool:
@@ -590,9 +605,9 @@ class SmartHeatingController:
         if onoff == 0 and not self.paused_by_us:
             self.status = STATUS_USER_OFF  # user switched it off: respect it
             return
-        if c.value("i", I_DEFROST) == 1:
-            self.status = STATUS_DEFROST
-            return
+        # input 35 is "defrost / startup": keep handling the rest and the
+        # setpoint, only leave the pause / resume decisions alone meanwhile
+        defrost_or_startup = c.value("i", I_DEFROST) == 1
 
         # 1. take over the setpoint: fixed LWT mode
         if c.value("h", H_WEATHER_MODE) not in (None, 0):
@@ -623,6 +638,10 @@ class SmartHeatingController:
         if current != target and due:
             await c.async_write(H_LWT_HEAT_SP, target)
             self._last_setpoint_write = now
+
+        if defrost_or_startup:
+            self.status = STATUS_COMPRESSOR_REST if self.rest_until is not None else STATUS_DEFROST
+            return
 
         # 3. pause / resume
         allowed, reason = self._heating_allowed(now)
@@ -754,6 +773,9 @@ class SmartHeatingController:
             "compressor_rest_minutes": int(self.rest_time.total_seconds() // 60)
             if s.rest
             else None,
+            "last_compressor_stop": None
+            if self.last_stop is None
+            else f"{dt_util.as_local(self.last_stop[0]):%H:%M} {self.last_stop[1]}",
             "compressor_rest_until": None
             if self.rest_until is None
             else dt_util.as_local(self.rest_until).strftime("%H:%M"),

@@ -38,6 +38,7 @@ from .const import (
     CONF_SMART_EARLY_SHORTFALL,
     CONF_SMART_EARLY_START,
     CONF_SMART_REST,
+    CONF_COP_SENSOR,
     ROOM_MODES,
     CONF_SMART_ROOM_TARGET,
     SMART_DEFAULTS,
@@ -149,6 +150,7 @@ class DcomOptionsFlow(OptionsFlow):
                 errors[CONF_SMART_OFF_TEMP] = "off_below_mild"
             else:
                 user_input.setdefault(CONF_SMART_ROOM_SENSOR, [])
+                user_input.setdefault(CONF_COP_SENSOR, "")
                 return self.async_create_entry(data=user_input)
 
         entry = self.config_entry
@@ -210,6 +212,24 @@ class DcomOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SMART_REST, default=opts[CONF_SMART_REST]
                 ): selector.BooleanSelector(),
+                # --- COP ---
+                vol.Optional(
+                    CONF_COP_SENSOR,
+                    description={
+                        "suggested_value": entry.options.get(CONF_COP_SENSOR) or None
+                    },
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        filter=[
+                            selector.EntityFilterSelectorConfig(
+                                domain="sensor", device_class="power"
+                            ),
+                            selector.EntityFilterSelectorConfig(
+                                domain="sensor", device_class="energy"
+                            ),
+                        ]
+                    )
+                ),
                 vol.Required(
                     CONF_SMART_ROOM_TARGET, default=opts[CONF_SMART_ROOM_TARGET]
                 ): _num(15, 28, 0.5),

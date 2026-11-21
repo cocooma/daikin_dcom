@@ -369,6 +369,30 @@ show_state: false
 To plot the curve with another card, use the `curve_points` attribute of **Smart heating target LWT**
 (`[outdoor, LWT]` pairs from −15 to +20 °C; not stored in the recorder).
 
+## COP
+
+The DCOM has no power or energy registers, so the electricity comes from your own sensor. In the options, set
+**COP: heat pump electricity sensor** to either a **power** sensor (W or kW) or an **energy meter** (Wh, kWh or
+MWh) on the heat pump's supply. The unit of the sensor decides how it is read: energy as deltas between polls
+(most accurate), power integrated over time. Without a sensor only *Thermal power* is created.
+
+| Entity | Meaning |
+|---|---|
+| **COP** | Rolling 15 min COP of the mode the unit is in now. Attributes: `mode`, the sensor used and its kind, and per mode (`heating_`, `cooling_`, `dhw_`): `cop_15min`, `cop_today`, `cop_lifetime`, `today_thermal_kwh`, `today_electrical_kwh` |
+| **Thermal power** | kW of heat delivered (heating / hot water) or extracted (cooling), from flow × ΔT. Works without a meter |
+| **Heat pump electrical power** | kW as read from your sensor |
+
+How it counts:
+
+* Heat = flow (input 49) × 4.186 × ΔT; heating and hot water use LWT (input 41, falling back to 40) − return,
+  cooling return − LWT. Defrost gives negative heat, which correctly lowers the heating total. Heat from the
+  hot water tank's booster heater is not measured, so the hot water COP looks low during disinfection.
+* Electricity is assigned to the mode the unit is in: 3-way valve on hot water → `dhw`, cooling → `cooling`,
+  otherwise `heating`. Standby counts too, so the daily COP is the real one.
+* The 15 min COP is empty while a mode hardly ran (less than 0.02 kWh of electricity in the window). Gaps over
+  5 min (restart, outage) are skipped. Totals survive restarts; "today" resets at local midnight.
+* At a 3 °C ΔT, a 0.3 °C error in either water sensor is about 10 % on the COP: read the daily values as a trend.
+
 ## Notes
 
 * Register numbers are used as Modbus addresses directly (manual: "Register Base 0"). If every value looks
@@ -380,8 +404,7 @@ To plot the curve with another card, use the `curve_points` attribute of **Smart
 * Setpoints written outside the unit's configured range are clamped by the DCOM; other out-of-range writes
   are ignored.
 * Written values are shown straight away and confirmed on the next poll.
-* The DCOM has no power or energy registers, so COP cannot be calculated from it alone; use a separate
-  energy meter for that.
+* The DCOM has no power or energy registers; the COP needs your own electricity sensor (see [COP](#cop)).
 
 ## Testing status
 

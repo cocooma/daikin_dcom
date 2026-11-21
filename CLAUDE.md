@@ -41,9 +41,12 @@ design decisions and working conventions behind it.
   (0 fixed, 1 weather dependent, 2/3 scheduled variants), 54/55 weather dependent offsets (−10..+10).
 * No access to field settings: overshoot [9-04], curve points [1-00]–[1-03], ΔT [9-09] etc. can only be set
   on the unit. That is why the controller runs its own curve via reg 53 = 0 + reg 1.
-* No power, energy, compressor frequency or current registers, so COP cannot be calculated from the DCOM
-  alone. A COP feature with an external meter was built and then removed at the user's request; don't
-  re-add it unless asked.
+* No power, energy, compressor frequency or current registers, so COP needs an external sensor. COP was
+  built, removed at the user's request, and re-added later on request (`cop.py`): one option
+  `cop_electricity_sensor` (power W/kW integrated, or energy Wh/kWh/MWh as deltas, chosen by its unit; the
+  older `cop_energy_sensor` / `cop_power_sensor` keys are still honoured). Sensors: one **COP** (15 min, current
+  mode; per-mode today/lifetime/15 min as attributes), **Thermal power** (always; persists the counters) and
+  **Heat pump electrical power**. The user preferred a single COP sensor over per-mode sensors.
 * Special values 32765/32766/32767 = wait / unavailable / unsupported → entity unavailable.
 * In weather dependent mode the DCOM exposes no calculated setpoint; the climate entity then shows and sets
   the offset (reg 54/55).
@@ -60,7 +63,8 @@ design decisions and working conventions behind it.
 | `image.py` | `render_curve_svg()` + image entity drawing the curve and operating point |
 | `number.py` | Weather offsets (54/55) and the four smart heating curve point numbers |
 | `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, quiet mode |
-| `sensor.py` | Temperatures, flow, error codes, smart target LWT, status and compressor starts sensors |
+| `sensor.py` | Temperatures, flow, error codes, smart target LWT, status, compressor starts, COP, thermal and electrical power |
+| `cop.py` | `CopTracker`: thermal power from flow × ΔT, electricity from the configured sensor, per-mode COP |
 | `config_flow.py` | Setup and options (control mode, poll interval, max LWT, mild/off thresholds, room sensor) |
 
 `coordinator.smart` holds the controller; it is created in `__init__.py` before the platforms are set up.

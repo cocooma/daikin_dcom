@@ -62,7 +62,7 @@ design decisions and working conventions behind it.
 | `smart.py` | `SmartHeatingController`: HA-side curve, mild-day window, warm cut-off, room correction, early start, compressor rest |
 | `image.py` | `render_curve_svg()` + image entity drawing the curve and operating point |
 | `number.py` | Weather offsets (54/55) and the four smart heating curve point numbers |
-| `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, quiet mode |
+| `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, cloudy-day override switch, quiet mode |
 | `sensor.py` | Temperatures, flow, error codes, smart target LWT, status, compressor starts, COP, thermal and electrical power |
 | `cop.py` | `CopTracker`: thermal power from flow × ΔT, electricity from the configured sensor, per-mode COP |
 | `config_flow.py` | Setup and options (control mode, poll interval, max LWT, mild/off thresholds, room sensor) |
@@ -87,6 +87,12 @@ design decisions and working conventions behind it.
 * Early start (option, off by default): during a mild-day pause outside the window, the coldest counted room
   ≥ shortfall (1.0 °C) below target for a delay (30 min) resumes heating (`heating_early_start`); it ends when
   that room is within 0.3 °C and the minimum early run (45 min) has passed. Not applied to warm or rooms-off pauses.
+* Cloudy-day override (option `smart_cloudy_weather_entity`, empty = off): during a mild-day pause outside the
+  window, heating resumes while the weather entity is cloudy (CLOUDY_STATES or `cloud_coverage` ≥ the `smart_cloudy_coverage` option, default 80 %) and a
+  selected thermostat is on and calling (`hvac_action` heating/preheating; without hvac_action ≥ 0.3 °C below
+  target). Ends after 15 min without both (`heating_cloudy_override`, logbook entries). Not applied to warm or
+  rooms-off pauses. Runs before early start in `_evaluate`. Both conditions are required (user's explicit choice: no override
+  on a clear day). On/off via the "Smart heating cloudy-day override" restore switch (`set_cloudy`, default on).
 * Compressor rest (option, on by default; length from a two-point rest curve on the dashboard, outdoor EMA →
   minutes, `rest_cold_*`/`rest_mild_*` restore numbers seeded from the old 20 min option): a compressor 1→0 transition (input 31) while space heating
   is on, not in DHW (input 37, now or on the previous reading) and not paused by the controller, starts a

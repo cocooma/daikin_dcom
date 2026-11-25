@@ -39,6 +39,8 @@ from .const import (
     CONF_SMART_EARLY_START,
     CONF_SMART_REST,
     CONF_COP_SENSOR,
+    CONF_SMART_WEATHER_ENTITY,
+    CONF_SMART_CLOUD_COVERAGE,
     ROOM_MODES,
     CONF_SMART_ROOM_TARGET,
     SMART_DEFAULTS,
@@ -151,6 +153,7 @@ class DcomOptionsFlow(OptionsFlow):
             else:
                 user_input.setdefault(CONF_SMART_ROOM_SENSOR, [])
                 user_input.setdefault(CONF_COP_SENSOR, "")
+                user_input.setdefault(CONF_SMART_WEATHER_ENTITY, "")
                 return self.async_create_entry(data=user_input)
 
         entry = self.config_entry
@@ -209,6 +212,15 @@ class DcomOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SMART_EARLY_MIN_RUN, default=opts[CONF_SMART_EARLY_MIN_RUN]
                 ): _num(30, 180, 5, "min"),
+                vol.Optional(
+                    CONF_SMART_WEATHER_ENTITY,
+                    description={
+                        "suggested_value": entry.options.get(CONF_SMART_WEATHER_ENTITY) or None
+                    },
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
+                vol.Required(
+                    CONF_SMART_CLOUD_COVERAGE, default=opts[CONF_SMART_CLOUD_COVERAGE]
+                ): _num(10, 100, 5, "%"),
                 vol.Required(
                     CONF_SMART_REST, default=opts[CONF_SMART_REST]
                 ): selector.BooleanSelector(),

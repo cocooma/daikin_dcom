@@ -184,7 +184,8 @@ one is switched back on. The usual minimum run (30 min) and pause (20 min) times
 * **Smart heating target LWT** sensor attributes: `room_offset` (current correction), `room_mode`,
   `room_error` (the combined shortfall), `room_driver` (the room that decides in coldest/warmest mode),
   `rooms` (each room's temperature, target and on/off), `curve_lwt` (the curve value before the correction),
-  and for early start `early_start`, `early_start_room` and `cold_room_since`.
+  for early start `early_start`, `early_start_room` and `cold_room_since`, and for the cloudy-day override
+  `cloudy_override`, `cloudy` and `rooms_calling_for_heat` (each room in `rooms` also has `calling`).
 * **Smart heating status**: `paused_rooms_off` while paused because all thermostats are off.
 * **Heating curve** image: the dashed line and the "now" label show the correction, e.g. `now 9.4° → 29° (room +1)`.
 
@@ -226,6 +227,7 @@ Set from the dashboard rather than the options; changes apply immediately and ar
 |---|---|---|
 | Smart heating window start / end (time) | 11:00 / 17:00 | On mild days heating runs only in this window. Pick the warmest hours for the best COP. May cross midnight; start = end means all day |
 | Smart heating mild-day window (switch) | on | Off: no time restriction on mild days; only the "no space heating above" limit applies |
+| Smart heating cloudy-day override (switch) | on | On: cloudy **and** a thermostat calling for heat lifts the window (needs the weather entity option, see [Cloudy-day override](#cloudy-day-override-optional)) |
 
 ### Early start for cold rooms (optional)
 
@@ -262,6 +264,39 @@ Example: 13 °C outside, window 11:00–17:00, bedroom thermostat at 24 °C.
 
 Without early start the same room would have dropped to about 22 °C by 11:00. The cost is an extra compressor
 start or two on mild days.
+
+### Cloudy-day override (optional)
+
+The mild-day window exists to heat in the warmest, sunniest hours. On an overcast day there is no sun to wait
+for, so if a room is asking for heat, holding it back until the window opens only makes the house colder.
+Set **Smart heating: weather entity for the cloudy-day override** (for example `weather.forecast_home`) and the
+window is not enforced while **both** hold:
+
+* **It is cloudy**: the weather entity's state is `cloudy`, `fog`, `rainy`, `pouring`, `snowy`, `snowy-rainy`,
+  `hail`, `lightning` or `lightning-rainy`, or its `cloud_coverage` attribute is at least the
+  **Smart heating: cloud coverage that counts as cloudy** option (default **80 %**, 10–100 %), so a grey
+  `partlycloudy` counts too. Lower it to let thinner cloud count.
+* **A thermostat is calling for heat**: one of the `climate` entities selected for
+  [room correction](#room-correction-optional) is switched on and its `hvac_action` is `heating`. Thermostats
+  that don't report `hvac_action` count as calling when they are **0.3 °C** or more below their target. Plain
+  temperature sensors are not used for this.
+
+How it works:
+
+* It only lifts the **mild-day pause outside the window**. The warm cut-off ("no space heating above") and the
+  pause when all thermostats are off still apply.
+* Heating resumes as soon as both conditions hold (after the usual 20 min minimum pause). Status:
+  `heating_cloudy_override`.
+* It ends once it has not been cloudy with a thermostat calling for **15 min** in a row (thermostats cycle and the
+  weather state flips, so it doesn't stop on the first change), and after the usual 30 min minimum run. Heating then
+  pauses again until the window opens.
+* Start and end are written to the logbook with the reason, e.g. "Mild-day window not enforced: cloudy and
+  climate.bedroom calling for heat".
+* Turn it on and off from the dashboard with the **Smart heating cloudy-day override** switch (on by default, state
+  restored after a restart). Off, or no weather entity set: the window is always enforced.
+* It works alongside [early start](#early-start-for-cold-rooms-optional):
+  the override reacts to any thermostat calling on a cloudy day; early start reacts to a room that is clearly too
+  cold, whatever the weather.
 
 ### Compressor rest (on by default)
 
@@ -333,7 +368,7 @@ on and off to see its effect.
 |---|---|
 | Smart heating control (switch) | Enables the controller; its state is restored after a restart. Attribute `status` |
 | Smart heating target LWT (sensor) | Setpoint the controller writes to reg 1. Attributes: averaged outdoor temperature, curve value, room correction, thresholds, window and `curve_points` |
-| Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
+| Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `heating_cloudy_override` (cloudy and a thermostat calling, window not enforced), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
 | Heating curve (image) | The curve drawn as a picture; see below |
 
 ### Behaviour and limits

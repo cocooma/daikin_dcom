@@ -12,7 +12,9 @@ Rules
   * Outdoor temperature is smoothed (exponential moving average) so short
     gusts / sun on the sensor do not move the setpoint.
   * avg >= heating off temperature           -> heating paused ("warm")
-  * avg >= mild temperature, outside window  -> heating paused ("mild")
+  * avg >= mild temperature, outside window  -> heating paused ("mild"),
+    unless it is cloudy and a thermostat is calling for heat (cloudy-day
+    override: no sun to wait for, so the window gains nothing)
   * otherwise heating allowed, LWT from the curve (+ room offset)
   * Thresholds have a 0.5 degC hysteresis; on/off changes are rate limited
     (minimum on / off time) and setpoint writes are rate limited too, so the
@@ -53,6 +55,8 @@ from .const import (
     CONF_SMART_EARLY_MIN_RUN,
     CONF_SMART_EARLY_SHORTFALL,
     CONF_SMART_EARLY_START,
+    CONF_SMART_WEATHER_ENTITY,
+    CONF_SMART_CLOUD_COVERAGE,
     CONF_SMART_REST,
     CONF_SMART_REST_MINUTES,
     CONF_SMART_MAX_LWT,
@@ -106,9 +110,19 @@ STATUS_PAUSED_WARM = "paused_warm"
 STATUS_PAUSED_MILD = "paused_mild_outside_window"
 STATUS_PAUSED_ROOMS_OFF = "paused_rooms_off"
 STATUS_EARLY_START = "heating_early_start"
+STATUS_CLOUDY = "heating_cloudy_override"
 STATUS_COMPRESSOR_REST = "compressor_rest"
 
 EARLY_STOP_BAND = 0.3  # degC: an early start ends once the coldest room is this close to target
+
+# cloudy-day override of the mild-day window
+CLOUDY_STATES = (
+    "cloudy", "fog", "rainy", "pouring", "snowy", "snowy-rainy",
+    "hail", "lightning", "lightning-rainy",
+)
+CLOUDY_HOLD = timedelta(minutes=15)  # override ends after this long without cloud + demand
+CALLING_ACTIONS = ("heating", "preheating")  # thermostat hvac_action = asking for heat
+CALLING_BAND = 0.3  # degC below target = calling, for thermostats without hvac_action
 
 # thermostat modes that count as "on" for heating
 HEAT_MODES = ("heat", "auto", "heat_cool")
@@ -135,6 +149,9 @@ class SmartSettings:
     early_shortfall: float
     early_delay: timedelta
     early_min_run: timedelta
+    weather_entity: str
+    cloud_coverage: float  # % cloud_coverage that counts as cloudy (e.g. a grey "partlycloudy")
+    cloudy_enabled: bool  # runtime, "Smart heating cloudy-day override" switch
     rest: bool
     rest_cold_out: float  # rest curve: outdoor °C → minutes, flat outside the points
     rest_cold_min: float
@@ -164,6 +181,9 @@ class SmartSettings:
             early_shortfall=float(o[CONF_SMART_EARLY_SHORTFALL]),
             early_delay=timedelta(minutes=float(o[CONF_SMART_EARLY_DELAY])),
             early_min_run=timedelta(minutes=float(o[CONF_SMART_EARLY_MIN_RUN])),
+            weather_entity=str(o.get(CONF_SMART_WEATHER_ENTITY) or ""),
+            cloud_coverage=float(o[CONF_SMART_CLOUD_COVERAGE]),
+            cloudy_enabled=True,
             rest=bool(o[CONF_SMART_REST]),
             rest_cold_out=0.0,
             rest_cold_min=float(o[CONF_SMART_REST_MINUTES]),
@@ -245,6 +265,11 @@ class SmartHeatingController:
         self.early_room: str | None = None
         self._cold_since: datetime | None = None
         self._early_started: datetime | None = None
+        # cloudy-day override of the mild-day window
+        self.cloudy: bool | None = None
+        self.calling_rooms: list[str] = []
+        self.cloudy_active = False
+        self._cloudy_clear_since: datetime | None = None
         # compressor: start counting and rest after the unit's own stops
         self._comp_prev: int | None = None
         self._valve_prev: int | None = None
@@ -467,7 +492,8 @@ class SmartHeatingController:
                     always counted as on.
         climate.* : current_temperature / temperature attributes (falls back
                     to target_temp_low, then the options target); on when its
-                    mode is heat, auto or heat_cool.
+                    mode is heat, auto or heat_cool; calling for heat when its
+                    hvac_action is heating, or (no hvac_action) it is 0.3 degC below target.
         """
         s = self.settings
         rooms: list[dict[str, Any]] = []
@@ -476,7 +502,7 @@ class SmartHeatingController:
             room: dict[str, Any] = {"entity": entity_id}
             room["thermostat"] = entity_id.startswith("climate.")
             if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                room.update(available=False, on=False, temperature=None, target=None)
+                room.update(available=False, on=False, temperature=None, target=None, calling=False)
             elif room["thermostat"]:
                 attrs = state.attributes
                 target = _float(attrs.get("temperature"))
@@ -488,12 +514,22 @@ class SmartHeatingController:
                     temperature=_float(attrs.get("current_temperature")),
                     target=s.room_target if target is None else target,
                 )
+                action = attrs.get("hvac_action")
+                if action is not None:
+                    calling = action in CALLING_ACTIONS
+                else:
+                    calling = (
+                        room["temperature"] is not None
+                        and room["temperature"] <= room["target"] - CALLING_BAND
+                    )
+                room["calling"] = room["on"] and calling
             else:
                 room.update(
                     available=True,
                     on=True,
                     temperature=_float(state.state),
                     target=s.room_target,
+                    calling=False,  # plain sensors don't ask for heat
                 )
             rooms.append(room)
         return rooms
@@ -568,6 +604,59 @@ class SmartHeatingController:
             self.early_room = coldest[1] if coldest else None
             self._cold_since = None
             return True
+        return False
+
+    def _is_cloudy(self) -> bool | None:
+        """Cloudy per the weather entity: overcast / wet / foggy state, or a
+        cloud_coverage attribute of at least the cloud coverage option (%). None = unknown."""
+        state = self.hass.states.get(self.settings.weather_entity)
+        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            return None
+        if state.state in CLOUDY_STATES:
+            return True
+        coverage = _float(state.attributes.get("cloud_coverage"))
+        return coverage is not None and coverage >= self.settings.cloud_coverage
+
+    def _cloudy_override(self, now: datetime, allowed: bool, reason: str | None) -> bool:
+        """Skip the mild-day pause while it is cloudy and a thermostat calls for heat.
+
+        The window exists to heat in the warm, sunny hours; under cloud there is
+        little to gain by waiting. Starts as soon as both hold, ends once they
+        have not held together for CLOUDY_HOLD (thermostats cycle, the weather
+        state flips). Only the mild-day pause is overridden: the warm cut-off and
+        the all-thermostats-off pause still apply. Returns the new allowed.
+        """
+        s = self.settings
+        self.calling_rooms = [
+            r["entity"] for r in self.rooms if r["thermostat"] and r["available"] and r.get("calling")
+        ]
+        self.cloudy = self._is_cloudy() if s.weather_entity else None
+        if not (s.cloudy_enabled and s.weather_entity) or allowed or reason != "mild":
+            self.cloudy_active = False
+            self._cloudy_clear_since = None
+            return allowed
+
+        if self.cloudy and self.calling_rooms:
+            self._cloudy_clear_since = None
+            if not self.cloudy_active:
+                self.cloudy_active = True
+                self._log(
+                    "Mild-day window not enforced: cloudy and "
+                    + ", ".join(self.calling_rooms)
+                    + " calling for heat"
+                )
+            return True
+        if self.cloudy_active:
+            if self._cloudy_clear_since is None:
+                self._cloudy_clear_since = now
+            if now - self._cloudy_clear_since < CLOUDY_HOLD:
+                return True
+            self.cloudy_active = False
+            self._cloudy_clear_since = None
+            self._log(
+                "Mild-day window enforced again: "
+                + ("no thermostat calling for heat" if self.cloudy else "no longer cloudy")
+            )
         return False
 
     def _all_thermostats_off(self) -> bool:
@@ -689,6 +778,7 @@ class SmartHeatingController:
 
         # 3. pause / resume
         allowed, reason = self._heating_allowed(now)
+        allowed = self._cloudy_override(now, allowed, reason)
         allowed = self._early_start(now, allowed, reason)
         since = (
             None if self._last_onoff_change is None else now - self._last_onoff_change
@@ -718,6 +808,8 @@ class SmartHeatingController:
             }.get(self._paused_reason, STATUS_PAUSED_MILD)
         elif self.rest_until is not None:
             self.status = STATUS_COMPRESSOR_REST
+        elif self.cloudy_active:
+            self.status = STATUS_CLOUDY
         elif self.early_active:
             self.status = STATUS_EARLY_START
         else:
@@ -738,6 +830,11 @@ class SmartHeatingController:
             s.window_end = end
         if enabled is not None:
             s.window_enabled = enabled
+        self._schedule()
+
+    def set_cloudy(self, enabled: bool) -> None:
+        """Cloudy-day override on / off (switch entity)."""
+        self.settings.cloudy_enabled = enabled
         self._schedule()
 
     # --- runtime curve settings (number entities) --------------------------
@@ -823,6 +920,11 @@ class SmartHeatingController:
             "compressor_rest_until": None
             if self.rest_until is None
             else dt_util.as_local(self.rest_until).strftime("%H:%M"),
+            "cloudy_override_enabled": s.cloudy_enabled and bool(s.weather_entity),
+            "cloudy_override": self.cloudy_active,
+            "cloudy": self.cloudy,
+            "cloud_coverage_threshold": s.cloud_coverage,
+            "rooms_calling_for_heat": self.calling_rooms,
             "early_start": s.early_start,
             "early_start_room": self.early_room,
             "cold_room_since": None
@@ -834,6 +936,7 @@ class SmartHeatingController:
                     "temperature": r["temperature"],
                     "target": r["target"],
                     "on": r["on"],
+                    "calling": r.get("calling", False),
                 }
                 for r in self.rooms
             ],

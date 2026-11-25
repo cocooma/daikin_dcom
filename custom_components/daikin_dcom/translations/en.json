@@ -39,6 +39,8 @@
           "smart_early_start_shortfall": "Smart heating: early start when a room is this far below target",
           "smart_early_start_delay": "Smart heating: … for at least (minutes)",
           "smart_early_start_min_run": "Smart heating: minimum early-start run (minutes)",
+          "smart_cloudy_weather_entity": "Smart heating: weather entity for the cloudy-day override (cloudy + a thermostat calling for heat = ignore the mild-day window); empty = off",
+          "smart_cloudy_coverage": "Smart heating: cloud coverage that counts as cloudy (%) – used when the weather entity reports cloud_coverage",
           "smart_compressor_rest": "Smart heating: rest the compressor after the unit stops it",
           "cop_electricity_sensor": "COP: heat pump electricity sensor – power (W/kW) or energy meter (kWh); empty = no COP"
         },
@@ -84,6 +86,7 @@
           "paused_mild_outside_window": "Paused (mild, outside window)",
           "paused_rooms_off": "Paused (all thermostats off)",
           "heating_early_start": "Heating (early start, cold room)",
+          "heating_cloudy_override": "Heating (cloudy, thermostat calling)",
           "compressor_rest": "Compressor resting"
         }
       }

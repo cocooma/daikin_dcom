@@ -81,6 +81,9 @@ Turn it on with the **Smart heating control** switch. While it is on and the uni
    averaged over about an hour, plus an optional room correction,
 3. pauses space heating (reg 4 = 0) on mild days outside the time window and on warm days, and resumes it.
 
+The full decision logic (pause order, overrides, thermostats, compressor rest) is drawn in
+[docs/smart-heating-logic.md](docs/smart-heating-logic.md).
+
 ### Settings (integration options)
 
 | Option | Default | Meaning |

@@ -113,6 +113,7 @@ CONF_SMART_ROOM_TARGET = "smart_room_target"
 CONF_SMART_ROOM_MAX_OFFSET = "smart_room_max_offset"
 CONF_SMART_ROOM_MODE = "smart_room_mode"
 CONF_SMART_ROOMS_OFF_PAUSE = "smart_rooms_off_pause"
+CONF_SMART_COOLING_STATS_OFF = "smart_cooling_thermostats_off"  # keep thermostats off in cooling
 CONF_SMART_EARLY_START = "smart_early_start"
 CONF_SMART_EARLY_SHORTFALL = "smart_early_start_shortfall"
 CONF_SMART_EARLY_DELAY = "smart_early_start_delay"
@@ -143,6 +144,7 @@ SMART_DEFAULTS = {
     CONF_SMART_ROOM_MAX_OFFSET: 3,
     CONF_SMART_ROOM_MODE: "coldest",  # which room drives the correction
     CONF_SMART_ROOMS_OFF_PAUSE: True,  # pause heating when all thermostats are off
+    CONF_SMART_COOLING_STATS_OFF: True,  # in cooling mode, keep the selected thermostats off
     CONF_SMART_EARLY_START: False,  # cold room may start heating outside the mild-day window
     CONF_SMART_EARLY_SHORTFALL: 1.0,  # degC below target ...
     CONF_SMART_EARLY_DELAY: 30,  # ... for this many minutes

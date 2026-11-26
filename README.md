@@ -173,9 +173,14 @@ step up); with *warmest* it would be −0.4 (no change).
 A thermostat in mode `off` (or `cool`) is **left out** of the correction: a room you switched off doesn't ask
 for heat.
 
-With *Pause heating when all selected thermostats are off* enabled, space heating is **paused** (reg 4 = 0,
-status `paused_rooms_off`) while **every** selected thermostat that can be read is off, and resumes as soon as
-one is switched back on. The usual minimum run (30 min) and pause (20 min) times apply. Notes:
+With *Switch space heating off at once when all selected thermostats are off* enabled (on by default), space
+heating is **paused** (reg 4 = 0, status `paused_rooms_off`) while **every** selected thermostat that can be read
+is off, and resumes as soon as one is switched back on. Notes:
+
+* It is checked at every poll and at least once a minute, and acts **at once**: it does not wait for the usual
+  30 min minimum run. If space heating is switched back on elsewhere (climate entity, Daikin interface) while
+  all thermostats are still off, it is switched off again at the next check.
+* Resuming still waits for the usual 20 min minimum pause.
 
 * Only thermostats count for this rule. Plain sensors have no on/off and don't prevent the pause, so if you mix
   sensors with a single thermostat, switching that thermostat off pauses the heating.
@@ -183,6 +188,14 @@ one is switched back on. The usual minimum run (30 min) and pause (20 min) times
 * The pause comes before the warm and mild-day rules, and like them it only resumes heating that the
   controller paused itself.
 * Turn the option off if you only want switched-off rooms ignored, without pausing the heat pump.
+
+#### Cooling mode
+
+The controller never touches the heat pump in cooling mode. With *Keep the selected thermostats off while the heat
+pump is in cooling mode* enabled (on by default), it does check the selected thermostats every minute and switches
+any that is on (`heat`, `auto`, `cool`, …) to `off`, with a logbook entry such as "Cooling mode: thermostats
+switched off (climate.bedroom)". They are not switched back on when the unit returns to heating: with all of them
+off, heating stays paused (`paused_rooms_off`) until you switch a thermostat on.
 
 #### Where to see it
 
@@ -425,7 +438,8 @@ on and off to see its effect.
   20 min, and writes the setpoint at most every 10 min (immediately if it changes by 2 °C or more).
 * It only resumes heating it paused itself: if you switch space heating off, it stays off.
   If you switch heating back **on** while it was paused, the controller notices and carries on managing it.
-* It does nothing in cooling mode or during defrost.
+* It does not touch the heat pump in cooling mode or during defrost (in cooling it only keeps the selected
+  thermostats off, see [Cooling mode](#cooling-mode)).
 * While it is on, setpoint and weather mode changes made elsewhere (climate entity, select, Daikin user
   interface) are overwritten. Switch it off to take manual control.
 * Overshoot ([9-04]) and the unit's own curve ([1-00]–[1-03]) are field settings with no DCOM register, so

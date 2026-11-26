@@ -119,6 +119,7 @@ CONF_SMART_EARLY_DELAY = "smart_early_start_delay"
 CONF_SMART_EARLY_MIN_RUN = "smart_early_start_min_run"
 CONF_SMART_WEATHER_ENTITY = "smart_cloudy_weather_entity"  # empty = no cloudy-day override
 CONF_SMART_CLOUD_COVERAGE = "smart_cloudy_coverage"  # % cloud_coverage that counts as cloudy
+CONF_SMART_WARM_STATS_OFF = "smart_warm_thermostats_off"  # thermostats off during the warm pause
 CONF_SMART_REST = "smart_compressor_rest"  # hold off restarts after the unit stops the compressor
 CONF_SMART_REST_MINUTES = "smart_compressor_rest_minutes"  # starting value for both rest curve points
 
@@ -148,6 +149,7 @@ SMART_DEFAULTS = {
     CONF_SMART_EARLY_MIN_RUN: 45,  # minutes an early start runs at least
     CONF_SMART_WEATHER_ENTITY: "",  # weather entity: cloudy + a thermostat calling -> ignore the window
     CONF_SMART_CLOUD_COVERAGE: 80,  # % cloud_coverage that also counts as cloudy
+    CONF_SMART_WARM_STATS_OFF: False,  # switch the selected thermostats off while paused for warm weather
     CONF_SMART_REST: True,
     CONF_SMART_REST_MINUTES: 20,
 }

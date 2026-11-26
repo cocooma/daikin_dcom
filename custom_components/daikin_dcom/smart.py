@@ -17,6 +17,8 @@ Rules
     unless it is cloudy and a thermostat is calling for heat (cloudy-day
     override: no sun to wait for, so the window gains nothing)
   * otherwise heating allowed, LWT from the curve (+ room offset)
+  * "heat only on thermostat demand" switch: additionally paused ("no_demand")
+    while no selected thermostat has been calling for heat for DEMAND_HOLD
   * Thresholds have a 0.5 degC hysteresis; on/off changes are rate limited
     (minimum on / off time) and setpoint writes are rate limited too, so the
     DCOM / unit is not written to on every poll.
@@ -111,6 +113,7 @@ STATUS_ACTIVE = "heating"
 STATUS_PAUSED_WARM = "paused_warm"
 STATUS_PAUSED_MILD = "paused_mild_outside_window"
 STATUS_PAUSED_ROOMS_OFF = "paused_rooms_off"
+STATUS_PAUSED_NO_DEMAND = "paused_no_demand"
 STATUS_EARLY_START = "heating_early_start"
 STATUS_CLOUDY = "heating_cloudy_override"
 STATUS_COMPRESSOR_REST = "compressor_rest"
@@ -124,6 +127,7 @@ CLOUDY_STATES = (
 )
 CLOUDY_HOLD = timedelta(minutes=15)  # override ends after this long without cloud + demand
 CALLING_ACTIONS = ("heating", "preheating")  # thermostat hvac_action = asking for heat
+DEMAND_HOLD = timedelta(minutes=10)  # demand-only: pause after this long with no thermostat calling
 CALLING_BAND = 0.3  # degC below target = calling, for thermostats without hvac_action
 
 # thermostat modes that count as "on" for heating
@@ -154,6 +158,7 @@ class SmartSettings:
     weather_entity: str
     cloud_coverage: float  # % cloud_coverage that counts as cloudy (e.g. a grey "partlycloudy")
     warm_stats_off: bool
+    demand_only: bool  # runtime, "Smart heating: heat only on thermostat demand" switch
     cloudy_enabled: bool  # runtime, "Smart heating cloudy-day override" switch
     rest: bool
     rest_cold_out: float  # rest curve: outdoor °C → minutes, flat outside the points
@@ -187,6 +192,7 @@ class SmartSettings:
             weather_entity=str(o.get(CONF_SMART_WEATHER_ENTITY) or ""),
             cloud_coverage=float(o[CONF_SMART_CLOUD_COVERAGE]),
             warm_stats_off=bool(o[CONF_SMART_WARM_STATS_OFF]),
+            demand_only=False,
             cloudy_enabled=True,
             rest=bool(o[CONF_SMART_REST]),
             rest_cold_out=0.0,
@@ -274,6 +280,8 @@ class SmartHeatingController:
         self.calling_rooms: list[str] = []
         self.cloudy_active = False
         self._cloudy_clear_since: datetime | None = None
+        # demand-only: last time a thermostat was calling for heat
+        self._last_demand: datetime | None = None
         # thermostats we switched off for the warm pause: entity -> hvac mode to restore
         self.stats_off_by_us: dict[str, str] = {}
         # compressor: start counting and rest after the unit's own stops
@@ -638,9 +646,6 @@ class SmartHeatingController:
         the all-thermostats-off pause still apply. Returns the new allowed.
         """
         s = self.settings
-        self.calling_rooms = [
-            r["entity"] for r in self.rooms if r["thermostat"] and r["available"] and r.get("calling")
-        ]
         self.cloudy = self._is_cloudy() if s.weather_entity else None
         if not (s.cloudy_enabled and s.weather_entity) or allowed or reason != "mild":
             self.cloudy_active = False
@@ -669,6 +674,36 @@ class SmartHeatingController:
                 + ("no thermostat calling for heat" if self.cloudy else "no longer cloudy")
             )
         return False
+
+    def _demand_gate(
+        self, now: datetime, allowed: bool, reason: str | None
+    ) -> tuple[bool, str | None]:
+        """Demand-only switch: heat only while a selected thermostat calls for heat.
+
+        Comes on top of the other rules (it never starts heating they would
+        pause). Pauses once no thermostat has called for DEMAND_HOLD; resumes
+        as soon as one calls (min off time permitting). Inactive when no
+        thermostat is readable (heat as usual rather than leave the house
+        cold), and while the controller itself holds the thermostats off for
+        warm weather (otherwise they could never be switched back on).
+        """
+        readable = [r for r in self.rooms if r["thermostat"] and r["available"]]
+        if self.calling_rooms:
+            self._last_demand = now
+        if not self.settings.demand_only or not allowed:
+            return allowed, reason
+        if not readable or self.stats_off_by_us:
+            return allowed, reason
+        if self.calling_rooms:
+            return True, None
+        if self._last_demand is not None and now - self._last_demand < DEMAND_HOLD:
+            return True, None
+        return False, "no_demand"
+
+    def set_demand_only(self, enabled: bool) -> None:
+        """Heat only on thermostat demand on / off (switch entity)."""
+        self.settings.demand_only = enabled
+        self._schedule()
 
     async def _sync_thermostats(self) -> None:
         """Warm pause: switch the selected thermostats off; heating back on: restore them."""
@@ -811,6 +846,9 @@ class SmartHeatingController:
         s = self.settings
         self.rooms = self._read_rooms()
         self._aggregate_room_error()
+        self.calling_rooms = [
+            r["entity"] for r in self.rooms if r["thermostat"] and r["available"] and r.get("calling")
+        ]
         self._update_room_offset(now)
         self.curve_value = curve_lwt(s, self.outdoor_avg)
         target = round(self.curve_value + self.room_offset)
@@ -840,6 +878,7 @@ class SmartHeatingController:
         allowed, reason = self._heating_allowed(now)
         allowed = self._cloudy_override(now, allowed, reason)
         allowed = self._early_start(now, allowed, reason)
+        allowed, reason = self._demand_gate(now, allowed, reason)
         since = (
             None if self._last_onoff_change is None else now - self._last_onoff_change
         )
@@ -866,6 +905,7 @@ class SmartHeatingController:
             self.status = {
                 "warm": STATUS_PAUSED_WARM,
                 "rooms_off": STATUS_PAUSED_ROOMS_OFF,
+                "no_demand": STATUS_PAUSED_NO_DEMAND,
             }.get(self._paused_reason, STATUS_PAUSED_MILD)
         elif self.rest_until is not None:
             self.status = STATUS_COMPRESSOR_REST
@@ -982,6 +1022,10 @@ class SmartHeatingController:
             if self.rest_until is None
             else dt_util.as_local(self.rest_until).strftime("%H:%M"),
             "cloudy_override_enabled": s.cloudy_enabled and bool(s.weather_entity),
+            "demand_only": s.demand_only,
+            "last_heat_demand": None
+            if self._last_demand is None
+            else dt_util.as_local(self._last_demand).strftime("%H:%M"),
             "cloudy_override": self.cloudy_active,
             "cloudy": self.cloudy,
             "cloud_coverage_threshold": s.cloud_coverage,

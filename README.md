@@ -79,7 +79,9 @@ Turn it on with the **Smart heating control** switch. While it is on and the uni
 1. sets the setpoint mode to *fixed* (reg 53 = 0); the previous mode is restored when you switch it off,
 2. writes the leaving water setpoint (reg 1) from its own curve, using the outdoor temperature (input 44)
    averaged over about an hour, plus an optional room correction,
-3. pauses space heating (reg 4 = 0) on mild days outside the time window and on warm days, and resumes it.
+3. pauses space heating (reg 4 = 0) on mild days outside the time window and on warm days, and resumes it;
+   optionally it also pauses whenever no thermostat is calling for heat
+   ([Heat only on thermostat demand](#heat-only-on-thermostat-demand-optional)).
 
 The full decision logic (pause order, overrides, thermostats, compressor rest) is drawn in
 [docs/smart-heating-logic.md](docs/smart-heating-logic.md).
@@ -188,7 +190,8 @@ one is switched back on. The usual minimum run (30 min) and pause (20 min) times
   `room_error` (the combined shortfall), `room_driver` (the room that decides in coldest/warmest mode),
   `rooms` (each room's temperature, target and on/off), `curve_lwt` (the curve value before the correction),
   for early start `early_start`, `early_start_room` and `cold_room_since`, and for the cloudy-day override
-  `cloudy_override`, `cloudy` and `rooms_calling_for_heat` (each room in `rooms` also has `calling`).
+  `cloudy_override`, `cloudy` and `rooms_calling_for_heat` (each room in `rooms` also has `calling`), and for
+  heat only on demand `demand_only` and `last_heat_demand`.
 * **Smart heating status**: `paused_rooms_off` while paused because all thermostats are off.
 * **Heating curve** image: the dashed line and the "now" label show the correction, e.g. `now 9.4° → 29° (room +1)`.
 
@@ -230,6 +233,7 @@ Set from the dashboard rather than the options; changes apply immediately and ar
 |---|---|---|
 | Smart heating window start / end (time) | 11:00 / 17:00 | On mild days heating runs only in this window. Pick the warmest hours for the best COP. May cross midnight; start = end means all day |
 | Smart heating mild-day window (switch) | on | Off: no time restriction on mild days; only the "no space heating above" limit applies |
+| Smart heating heat only on thermostat demand (switch) | off | On: space heating only runs while a selected thermostat calls for heat, see [Heat only on thermostat demand](#heat-only-on-thermostat-demand-optional) |
 | Smart heating cloudy-day override (switch) | on | On: cloudy **and** a thermostat calling for heat lifts the window (needs the weather entity option, see [Cloudy-day override](#cloudy-day-override-optional)) |
 
 ### Early start for cold rooms (optional)
@@ -300,6 +304,30 @@ How it works:
 * It works alongside [early start](#early-start-for-cold-rooms-optional):
   the override reacts to any thermostat calling on a cloudy day; early start reacts to a room that is clearly too
   cold, whatever the weather.
+
+### Heat only on thermostat demand (optional)
+
+With the **Smart heating heat only on thermostat demand** switch on, space heating only runs while at least one of
+the thermostats selected for [room correction](#room-correction-optional) is calling for heat, and is paused
+(reg 4 = 0) when none is. Hot water is not affected.
+
+* "Calling for heat" is the same test as for the cloudy-day override: the thermostat is on and its `hvac_action`
+  is `heating`, or (without `hvac_action`) it is 0.3 °C or more below its target.
+* It comes **on top of** the other rules: it never starts heating that the warm cut-off, the mild-day window or
+  the all-thermostats-off pause would stop. Inside those limits it pauses once no thermostat has called for
+  **10 min**, and resumes as soon as one calls. The usual 30 min minimum run and 20 min minimum pause still apply,
+  so the compressor doesn't short-cycle when a thermostat flips on and off.
+* If no selected thermostat can be read (none configured, or all unavailable), it does nothing and heating runs as
+  usual rather than leaving the house cold.
+* While the controller itself holds the thermostats off for warm weather, it is skipped, so heating can restart
+  and switch them back on.
+* Status: `paused_no_demand`. The target LWT sensor shows `demand_only`, `last_heat_demand` (time a thermostat
+  last called) and `rooms_calling_for_heat`.
+* The state of the switch is restored after a restart. Off by default.
+
+With underfloor heating the room responds slowly, so expect fewer, longer runs, each ending some time after the
+thermostats are satisfied. Thermostats with a small hysteresis (0.2–0.3 °C) will start the heat pump often; a
+larger one gives longer runs.
 
 ### Thermostats off in warm weather (optional)
 
@@ -388,7 +416,7 @@ on and off to see its effect.
 |---|---|
 | Smart heating control (switch) | Enables the controller; its state is restored after a restart. Attribute `status` |
 | Smart heating target LWT (sensor) | Setpoint the controller writes to reg 1. Attributes: averaged outdoor temperature, curve value, room correction, thresholds, window and `curve_points` |
-| Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `heating_cloudy_override` (cloudy and a thermostat calling, window not enforced), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
+| Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `heating_cloudy_override` (cloudy and a thermostat calling, window not enforced), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `paused_no_demand` (no thermostat calling, demand-only switch on), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
 | Heating curve (image) | The curve drawn as a picture; see below |
 
 ### Behaviour and limits

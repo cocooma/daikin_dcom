@@ -11,7 +11,8 @@ What it writes (only while enabled and the unit is heating):
 Rules
   * Outdoor temperature is smoothed (exponential moving average) so short
     gusts / sun on the sensor do not move the setpoint.
-  * avg >= heating off temperature           -> heating paused ("warm")
+  * avg >= heating off temperature           -> heating paused ("warm"); optionally
+    the selected thermostats are switched off too, and back on when heating restarts
   * avg >= mild temperature, outside window  -> heating paused ("mild"),
     unless it is cloudy and a thermostat is calling for heat (cloudy-day
     override: no sun to wait for, so the window gains nothing)
@@ -57,6 +58,7 @@ from .const import (
     CONF_SMART_EARLY_START,
     CONF_SMART_WEATHER_ENTITY,
     CONF_SMART_CLOUD_COVERAGE,
+    CONF_SMART_WARM_STATS_OFF,
     CONF_SMART_REST,
     CONF_SMART_REST_MINUTES,
     CONF_SMART_MAX_LWT,
@@ -151,6 +153,7 @@ class SmartSettings:
     early_min_run: timedelta
     weather_entity: str
     cloud_coverage: float  # % cloud_coverage that counts as cloudy (e.g. a grey "partlycloudy")
+    warm_stats_off: bool
     cloudy_enabled: bool  # runtime, "Smart heating cloudy-day override" switch
     rest: bool
     rest_cold_out: float  # rest curve: outdoor °C → minutes, flat outside the points
@@ -183,6 +186,7 @@ class SmartSettings:
             early_min_run=timedelta(minutes=float(o[CONF_SMART_EARLY_MIN_RUN])),
             weather_entity=str(o.get(CONF_SMART_WEATHER_ENTITY) or ""),
             cloud_coverage=float(o[CONF_SMART_CLOUD_COVERAGE]),
+            warm_stats_off=bool(o[CONF_SMART_WARM_STATS_OFF]),
             cloudy_enabled=True,
             rest=bool(o[CONF_SMART_REST]),
             rest_cold_out=0.0,
@@ -270,6 +274,8 @@ class SmartHeatingController:
         self.calling_rooms: list[str] = []
         self.cloudy_active = False
         self._cloudy_clear_since: datetime | None = None
+        # thermostats we switched off for the warm pause: entity -> hvac mode to restore
+        self.stats_off_by_us: dict[str, str] = {}
         # compressor: start counting and rest after the unit's own stops
         self._comp_prev: int | None = None
         self._valve_prev: int | None = None
@@ -313,6 +319,9 @@ class SmartHeatingController:
         self.enabled = bool(data.get("enabled", False))
         self.paused_by_us = bool(data.get("paused_by_us", False))
         self.room_offset = int(data.get("room_offset", 0))
+        self.stats_off_by_us = {
+            str(k): str(v) for k, v in (data.get("thermostats_off") or {}).items()
+        }
         prev = data.get("previous_weather_mode")
         self.previous_weather_mode = None if prev is None else int(prev)
         starts = data.get("starts") or {}
@@ -330,6 +339,7 @@ class SmartHeatingController:
             "paused_by_us": self.paused_by_us,
             "room_offset": self.room_offset,
             "previous_weather_mode": self.previous_weather_mode,
+            "thermostats_off": self.stats_off_by_us,
             "starts": {
                 "day": None if self._starts_day is None else self._starts_day.isoformat(),
                 "all": self.starts_today,
@@ -357,6 +367,7 @@ class SmartHeatingController:
                     await c.async_write(H_WEATHER_MODE, self.previous_weather_mode)
             except UpdateFailed as err:
                 _LOGGER.warning("Smart heating: restoring unit state failed: %s", err)
+            await self._thermostats_on("smart heating switched off")
             self.paused_by_us = False
             self.previous_weather_mode = None
             self.room_offset = 0
@@ -659,6 +670,55 @@ class SmartHeatingController:
             )
         return False
 
+    async def _sync_thermostats(self) -> None:
+        """Warm pause: switch the selected thermostats off; heating back on: restore them."""
+        if self.paused_by_us and self._paused_reason == "warm":
+            if self.settings.warm_stats_off and not self.stats_off_by_us:
+                await self._thermostats_off()
+        elif not self.paused_by_us and self.stats_off_by_us:
+            await self._thermostats_on("heating restarted")
+
+    async def _thermostats_off(self) -> None:
+        saved: dict[str, str] = {}
+        for entity_id in self.settings.room_sensors:
+            if not entity_id.startswith("climate."):
+                continue
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state in ("off", STATE_UNKNOWN, STATE_UNAVAILABLE):
+                continue
+            saved[entity_id] = state.state
+        if not saved:
+            return
+        await self._set_modes({e: "off" for e in saved})
+        self.stats_off_by_us = saved
+        self._log("Warm weather pause: thermostats switched off (" + ", ".join(saved) + ")")
+
+    async def _thermostats_on(self, why: str) -> None:
+        """Back to the saved mode; thermostats someone changed meanwhile are left alone."""
+        if not self.stats_off_by_us:
+            return
+        restore = {}
+        for entity_id, mode in self.stats_off_by_us.items():
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state == "off":
+                restore[entity_id] = mode
+        self.stats_off_by_us = {}
+        if restore:
+            await self._set_modes(restore)
+            self._log(f"{why[0].upper()}{why[1:]}: thermostats switched back on (" + ", ".join(restore) + ")")
+
+    async def _set_modes(self, modes: dict[str, str]) -> None:
+        for entity_id, mode in modes.items():
+            try:
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_hvac_mode",
+                    {"entity_id": entity_id, "hvac_mode": mode},
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001 - one bad thermostat must not stop the rest
+                _LOGGER.warning("Smart heating: setting %s to %s failed: %s", entity_id, mode, err)
+
     def _all_thermostats_off(self) -> bool:
         """True if at least one selected thermostat is readable and none is on."""
         stats = [r for r in self.rooms if r["thermostat"] and r["available"]]
@@ -686,7 +746,7 @@ class SmartHeatingController:
         s = self.settings
         t = self.outdoor_avg
         reason = self._paused_reason
-        if s.rooms_off_pause and self._all_thermostats_off():
+        if s.rooms_off_pause and not self.stats_off_by_us and self._all_thermostats_off():
             return False, "rooms_off"
         warm_limit = s.off_temp - (HYSTERESIS if reason == "warm" else 0)
         if t >= warm_limit:
@@ -797,6 +857,7 @@ class SmartHeatingController:
                 self._last_onoff_change = now
         elif not allowed and onoff == 0:
             self._paused_reason = reason
+        await self._sync_thermostats()
         # the early start's minimum run counts from when heating is really on
         if self.early_active and self._early_started is None and c.value("h", H_SPACE_ONOFF) == 1:
             self._early_started = now
@@ -941,6 +1002,8 @@ class SmartHeatingController:
                 for r in self.rooms
             ],
             "paused_by_controller": self.paused_by_us,
+            "warm_thermostats_off": s.warm_stats_off,
+            "thermostats_off_by_controller": list(self.stats_off_by_us),
             "curve": f"{s.cold_out:g}°C→{s.cold_lwt:g}°C, {s.warm_out:g}°C→{s.warm_lwt:g}°C",
             "mild_temp": s.mild_temp,
             "heating_off_temp": s.off_temp,

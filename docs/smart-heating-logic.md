@@ -35,7 +35,8 @@ flowchart TD
 
 ## 2. Pause decision
 
-Checked in this order; the first match wins. Thresholds use the outdoor temperature averaged over about an hour,
+Checked in this order; the first match wins. The **heat only on thermostat demand** check comes last and can only
+turn "heat" into a pause, never the other way round. Thresholds use the outdoor temperature averaged over about an hour,
 with 0.5 °C hysteresis.
 
 ```mermaid
@@ -45,12 +46,15 @@ flowchart TD
     q0 -- no --> q1{"Outdoor avg ≥<br/>no space heating above?"}
     q1 -- yes --> warm["Pause<br/>paused_warm"]
     q1 -- no --> q2{"Window switch on,<br/>outdoor avg ≥ mild day above,<br/>outside the window?"}
-    q2 -- no --> heat["Heat<br/>heating"]
+    q2 -- no --> dem
     q2 -- yes --> q3{"Cloudy-day override switch on,<br/>weather cloudy (state or coverage ≥ option)<br/>and a thermostat calling for heat?"}
-    q3 -- yes --> cloudy["Heat<br/>heating_cloudy_override<br/>(ends 15 min after the conditions stop)"]
+    q3 -- yes --> cloudy["heating_cloudy_override<br/>(ends 15 min after the conditions stop)"] --> dem
     q3 -- no --> q4{"Early start on and the coldest room<br/>≥ shortfall below target for the delay?"}
-    q4 -- yes --> early["Heat<br/>heating_early_start<br/>(until within 0.3 °C and min run done)"]
+    q4 -- yes --> early["heating_early_start<br/>(until within 0.3 °C and min run done)"] --> dem
     q4 -- no --> mild["Pause<br/>paused_mild_outside_window"]
+    dem{"Heat only on thermostat demand switch on,<br/>a thermostat readable, none held off by us,<br/>and none calling for 10 min?"}
+    dem -- yes --> nodemand["Pause<br/>paused_no_demand"]
+    dem -- no --> heat["Heat<br/>heating / override status"]
 ```
 
 ## 3. Thermostats in warm weather

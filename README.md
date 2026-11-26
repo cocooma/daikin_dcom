@@ -432,6 +432,21 @@ on and off to see its effect.
 | Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `heating_cloudy_override` (cloudy and a thermostat calling, window not enforced), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `paused_no_demand` (no thermostat calling, demand-only switch on), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
 | Heating curve (image) | The curve drawn as a picture; see below |
 
+The status sensor's icon follows its state:
+
+| Status | Icon | Status | Icon |
+|---|---|---|---|
+| `heating` | `mdi:radiator` | `paused_warm` | `mdi:weather-sunny` |
+| `heating_early_start` | `mdi:clock-fast` | `paused_mild_outside_window` | `mdi:sun-clock` |
+| `heating_cloudy_override` | `mdi:weather-cloudy-clock` | `paused_rooms_off` | `mdi:thermometer-off` |
+| `compressor_rest` | `mdi:sleep` | `paused_no_demand` | `mdi:pause-circle-outline` |
+| `defrost` | `mdi:snowflake-melt` | `space_heating_off` | `mdi:radiator-off` |
+| `cooling_mode` | `mdi:snowflake` | `waiting_for_data` | `mdi:timer-sand` |
+| `disabled` | `mdi:power-off` | | |
+
+An icon you set yourself on the entity (Settings → Entities) overrides these.
+
+
 ### Behaviour and limits
 
 * Thresholds use 0.5 °C hysteresis. The controller keeps heating on for at least 30 min and off for at least

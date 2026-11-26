@@ -69,7 +69,11 @@ design decisions and working conventions behind it.
 
 `coordinator.smart` holds the controller; it is created in `__init__.py` before the platforms are set up.
 
-## Smart heating controller rules (keep consistent with README)
+## Smart heating controller rules (keep consistent with README and `docs/smart-heating-logic.md`)
+
+`docs/smart-heating-logic.md` holds Mermaid flowcharts of the logic (rendered by GitHub; check syntax with
+`mmdc`). Update them when a rule below changes.
+
 
 * Only acts when enabled and the unit is heating; does nothing in cooling or during defrost.
 * Takes over the setpoint: reg 53 → 0 (previous mode remembered and restored on disable), reg 1 = curve

@@ -93,6 +93,12 @@ design decisions and working conventions behind it.
   target). Ends after 15 min without both (`heating_cloudy_override`, logbook entries). Not applied to warm or
   rooms-off pauses. Runs before early start in `_evaluate`. Both conditions are required (user's explicit choice: no override
   on a clear day). On/off via the "Smart heating cloudy-day override" restore switch (`set_cloudy`, default on).
+* Thermostats off in warm weather (option `smart_warm_thermostats_off`, default off): when the controller has
+  paused for "warm", the selected `climate` entities that are on are set to `off` via `climate.set_hvac_mode`
+  (previous mode saved in `stats_off_by_us`, persisted as `thermostats_off`); restored when `paused_by_us`
+  clears (heating restarted, stale flag cleared, or controller disabled), only those still `off`. A warm pause
+  that becomes a mild pause keeps them off until heating restarts (user's wording: "when the heating
+  restarts"). The rooms-off pause is skipped while `stats_off_by_us` is set.
 * Compressor rest (option, on by default; length from a two-point rest curve on the dashboard, outdoor EMA →
   minutes, `rest_cold_*`/`rest_mild_*` restore numbers seeded from the old 20 min option): a compressor 1→0 transition (input 31) while space heating
   is on, not in DHW (input 37, now or on the previous reading) and not paused by the controller, starts a

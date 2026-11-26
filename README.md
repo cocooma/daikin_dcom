@@ -298,6 +298,23 @@ How it works:
   the override reacts to any thermostat calling on a cloudy day; early start reacts to a room that is clearly too
   cold, whatever the weather.
 
+### Thermostats off in warm weather (optional)
+
+With **Smart heating: switch the selected thermostats off while heating is paused for warm weather** enabled,
+the controller switches your thermostats off when it pauses heating because it is warmer than **no space heating
+above**, and switches them back on when it restarts heating.
+
+* It uses the `climate` entities selected for [room correction](#room-correction-optional). Thermostats that are
+  already off are left alone; plain temperature sensors are not affected.
+* Each thermostat goes back to the mode it had before (`heat`, `auto`, …). One you switch on or change yourself
+  in the meantime is left as you set it.
+* They come back on when heating **restarts**, not merely when it gets cooler. If the warm pause turns into a
+  mild-day pause outside the window, they stay off until the window opens (or the controller is switched off).
+* While the controller has them off, the "all thermostats off" pause is skipped, so it can't block the restart.
+* Switching smart heating off also switches them back on. Which thermostats were switched off survives a restart.
+* Both steps are written to the logbook, e.g. "Warm weather pause: thermostats switched off (climate.bedroom,
+  climate.living)". The target LWT sensor shows `thermostats_off_by_controller`.
+
 ### Compressor rest (on by default)
 
 On mild days the unit's minimum output is more than the house needs, so the water overshoots its target and

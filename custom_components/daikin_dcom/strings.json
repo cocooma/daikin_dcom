@@ -35,6 +35,7 @@
           "smart_room_max_offset": "Smart heating: maximum room correction (°C)",
           "smart_room_mode": "Smart heating: room that drives the correction",
           "smart_rooms_off_pause": "Smart heating: pause heating when all selected thermostats are off",
+          "smart_warm_thermostats_off": "Smart heating: switch the selected thermostats off while heating is paused for warm weather (back on when heating restarts)",
           "smart_early_start": "Smart heating: early start for cold rooms (outside the mild-day window)",
           "smart_early_start_shortfall": "Smart heating: early start when a room is this far below target",
           "smart_early_start_delay": "Smart heating: … for at least (minutes)",

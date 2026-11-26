@@ -41,6 +41,7 @@ from .const import (
     CONF_COP_SENSOR,
     CONF_SMART_WEATHER_ENTITY,
     CONF_SMART_CLOUD_COVERAGE,
+    CONF_SMART_WARM_STATS_OFF,
     ROOM_MODES,
     CONF_SMART_ROOM_TARGET,
     SMART_DEFAULTS,
@@ -199,6 +200,9 @@ class DcomOptionsFlow(OptionsFlow):
                 ): _select(list(ROOM_MODES), "room_mode"),
                 vol.Required(
                     CONF_SMART_ROOMS_OFF_PAUSE, default=opts[CONF_SMART_ROOMS_OFF_PAUSE]
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_SMART_WARM_STATS_OFF, default=opts[CONF_SMART_WARM_STATS_OFF]
                 ): selector.BooleanSelector(),
                 vol.Required(
                     CONF_SMART_EARLY_START, default=opts[CONF_SMART_EARLY_START]

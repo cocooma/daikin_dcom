@@ -24,6 +24,7 @@ async def async_setup_entry(
             DcomSmartHeatingSwitch(coordinator),
             DcomSmartWindowSwitch(coordinator),
             DcomSmartCloudySwitch(coordinator),
+            DcomSmartDemandSwitch(coordinator),
         ]
     )
 
@@ -147,4 +148,33 @@ class DcomSmartCloudySwitch(DcomEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._smart.set_cloudy(False)
+        self.async_write_ha_state()
+
+
+class DcomSmartDemandSwitch(DcomEntity, SwitchEntity, RestoreEntity):
+    """On: space heating only runs while a selected thermostat calls for heat."""
+
+    _attr_name = "Smart heating heat only on thermostat demand"
+    _attr_icon = "mdi:thermostat-auto"
+
+    def __init__(self, coordinator: DcomCoordinator) -> None:
+        super().__init__(coordinator, "smart_demand_only")
+        self._smart = coordinator.smart
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state in ("on", "off"):
+            self._smart.set_demand_only(last.state == "on")
+
+    @property
+    def is_on(self) -> bool:
+        return self._smart.settings.demand_only
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._smart.set_demand_only(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._smart.set_demand_only(False)
         self.async_write_ha_state()

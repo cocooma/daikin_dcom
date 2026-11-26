@@ -62,7 +62,7 @@ design decisions and working conventions behind it.
 | `smart.py` | `SmartHeatingController`: HA-side curve, mild-day window, warm cut-off, room correction, early start, compressor rest |
 | `image.py` | `render_curve_svg()` + image entity drawing the curve and operating point |
 | `number.py` | Weather offsets (54/55) and the four smart heating curve point numbers |
-| `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, cloudy-day override switch, quiet mode |
+| `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, cloudy-day override switch, demand-only switch, quiet mode |
 | `sensor.py` | Temperatures, flow, error codes, smart target LWT, status, compressor starts, COP, thermal and electrical power |
 | `cop.py` | `CopTracker`: thermal power from flow × ΔT, electricity from the configured sensor, per-mode COP |
 | `config_flow.py` | Setup and options (control mode, poll interval, max LWT, mild/off thresholds, room sensor) |
@@ -96,6 +96,11 @@ design decisions and working conventions behind it.
   target). Ends after 15 min without both (`heating_cloudy_override`, logbook entries). Not applied to warm or
   rooms-off pauses. Runs before early start in `_evaluate`. Both conditions are required (user's explicit choice: no override
   on a clear day). On/off via the "Smart heating cloudy-day override" restore switch (`set_cloudy`, default on).
+* Heat only on thermostat demand (restore switch, default off, `set_demand_only`): `_demand_gate` runs after
+  the other rules and can only take heating away: with heating allowed, pause (`no_demand`,
+  `paused_no_demand`) once no selected thermostat has called (same calling test as the cloudy override) for
+  DEMAND_HOLD = 10 min. Inactive when no thermostat is readable, and while `stats_off_by_us` (else the warm-weather
+  thermostats could never be restored). `calling_rooms` is computed once per evaluation in `_evaluate`.
 * Thermostats off in warm weather (option `smart_warm_thermostats_off`, default off): when the controller has
   paused for "warm", the selected `climate` entities that are on are set to `off` via `climate.set_hvac_mode`
   (previous mode saved in `stats_off_by_us`, persisted as `thermostats_off`); restored when `paused_by_us`

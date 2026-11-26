@@ -190,7 +190,7 @@ STATUS_ICONS = {
 }
 
 
-class DcomSmartStatusSensor(_SmartSensorBase):
+class DcomSmartStatusSensor(_SmartSensorBase, RestoreEntity):
     """What the smart heating controller is doing.
 
     Logbook entries (compressor rest start / end) are attached to this entity,
@@ -198,6 +198,9 @@ class DcomSmartStatusSensor(_SmartSensorBase):
     """
 
     async def async_added_to_hass(self) -> None:
+        # show the last status through the restart instead of a brief "disabled"
+        if (last := await self.async_get_last_state()) is not None:
+            self.coordinator.smart.hold_status(last.state)
         await super().async_added_to_hass()
         self.coordinator.smart.status_entity_id = self.entity_id
 

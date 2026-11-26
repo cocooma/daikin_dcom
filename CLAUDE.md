@@ -123,8 +123,9 @@ design decisions and working conventions behind it.
   to 25 °C; the curve target is written back when the rest ends or the unit restarts by itself. Stops older than
   5 min when handled are ignored. Starts are counted in `_track_compressor`, called from `_schedule` on every
   update even when the controller is disabled; counts persist in the switch's restore data.
-* Runtime state (enabled, paused_by_us, room offset, previous mode) persists through the switch's restore
-  data. Window times/switch and curve points are their own restore entities; restoring them must not
+* Runtime state (enabled, paused_by_us, paused_reason, room offset, previous mode) persists through the switch's restore
+  data. The status sensor is a RestoreEntity: `hold_status()` shows its last state until `restore()` has run and an
+  evaluation gives something other than `waiting_for_data` (max STATUS_HOLD = 2 min; cleared by enable/disable). Window times/switch and curve points are their own restore entities; restoring them must not
   trigger writes (`set_curve(..., evaluate=False)`, `restore()` only notifies).
 * Settings split: curve points and window on the dashboard (entities, no reload); max LWT, thresholds and
   room sensor in the options (reload). Old option values for the curve/window act as initial values.

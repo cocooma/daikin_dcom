@@ -121,6 +121,12 @@ STATUS_PAUSED_NO_DEMAND = "paused_no_demand"
 STATUS_EARLY_START = "heating_early_start"
 STATUS_CLOUDY = "heating_cloudy_override"
 STATUS_COMPRESSOR_REST = "compressor_rest"
+ALL_STATUSES = (
+    STATUS_DISABLED, STATUS_WAITING, STATUS_COOLING, STATUS_USER_OFF, STATUS_DEFROST,
+    STATUS_ACTIVE, STATUS_PAUSED_WARM, STATUS_PAUSED_MILD, STATUS_PAUSED_ROOMS_OFF,
+    STATUS_PAUSED_NO_DEMAND, STATUS_EARLY_START, STATUS_CLOUDY, STATUS_COMPRESSOR_REST,
+)
+STATUS_HOLD = timedelta(minutes=2)  # keep the restored status at most this long after a restart
 
 EARLY_STOP_BAND = 0.3  # degC: an early start ends once the coldest room is this close to target
 
@@ -302,6 +308,10 @@ class SmartHeatingController:
         self.heating_starts_today = 0
         self._starts_day = None
         self._paused_reason: str | None = None
+        # restart: show the last status until the controller is restored and has data
+        self._restored = False
+        self._held_status: str | None = None
+        self._held_until: datetime | None = None
         self.status = STATUS_DISABLED
         self.target_lwt: int | None = None
         self.curve_value: float | None = None
@@ -332,6 +342,9 @@ class SmartHeatingController:
     def restore(self, data: dict[str, Any]) -> None:
         self.enabled = bool(data.get("enabled", False))
         self.paused_by_us = bool(data.get("paused_by_us", False))
+        reason = data.get("paused_reason")
+        self._paused_reason = str(reason) if self.paused_by_us and reason else None
+        self._restored = True
         self.room_offset = int(data.get("room_offset", 0))
         self.stats_off_by_us = {
             str(k): str(v) for k, v in (data.get("thermostats_off") or {}).items()
@@ -347,10 +360,29 @@ class SmartHeatingController:
         # after this one. The next poll or minute tick evaluates.
         self._notify()
 
+    def hold_status(self, value: str | None) -> None:
+        """Status sensor restore: keep showing the last status after a restart
+        until the controller has been restored and evaluated with data (at most
+        STATUS_HOLD), instead of a brief "disabled" / "waiting_for_data"."""
+        if value not in ALL_STATUSES or self._held_status is not None:
+            return
+        self._held_status = value
+        self._held_until = dt_util.utcnow() + STATUS_HOLD
+        self.status = value
+
+    def _apply_held_status(self) -> None:
+        if self._held_status is None:
+            return
+        if (not self._restored or self.status == STATUS_WAITING) and dt_util.utcnow() < self._held_until:
+            self.status = self._held_status
+        else:
+            self._held_status = None
+
     def persist(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
             "paused_by_us": self.paused_by_us,
+            "paused_reason": self._paused_reason,
             "room_offset": self.room_offset,
             "previous_weather_mode": self.previous_weather_mode,
             "thermostats_off": self.stats_off_by_us,
@@ -364,6 +396,7 @@ class SmartHeatingController:
     # --- enable / disable --------------------------------------------------
     async def async_enable(self) -> None:
         async with self._lock:
+            self._held_status = None  # switched by hand: show the real status
             mode = self.coordinator.value("h", H_WEATHER_MODE)
             if mode not in (None, 0):
                 self.previous_weather_mode = mode
@@ -372,6 +405,7 @@ class SmartHeatingController:
 
     async def async_disable(self) -> None:
         async with self._lock:
+            self._held_status = None  # switched by hand: show the real status
             self.enabled = False
             c = self.coordinator
             try:
@@ -824,6 +858,7 @@ class SmartHeatingController:
                 await self._evaluate()
             except UpdateFailed as err:
                 _LOGGER.warning("Smart heating: write failed: %s", err)
+            self._apply_held_status()
         self._notify()
 
     async def _evaluate(self) -> None:

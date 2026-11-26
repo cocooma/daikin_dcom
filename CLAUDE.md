@@ -75,7 +75,7 @@ design decisions and working conventions behind it.
 `mmdc`). Update them when a rule below changes.
 
 
-* Only acts when enabled and the unit is heating; does nothing in cooling or during defrost.
+* Only acts when enabled and the unit is heating; in cooling it only keeps the thermostats off (option); nothing during defrost.
 * Takes over the setpoint: reg 53 → 0 (previous mode remembered and restored on disable), reg 1 = curve
   value + room offset, clamped to 25..max LWT. Outdoor temperature (input 44) is an EMA with ~60 min τ.
 * Pauses space heating (reg 4 = 0) above the off temperature, and above the mild temperature outside the
@@ -88,6 +88,11 @@ design decisions and working conventions behind it.
 * Room correction: ±1 °C step every 45 min when the room is ≥ 0.5 °C off target, limited to ±max.
 * Room correction can use several `sensor`/`climate` entities (thermostats: own target, skipped while off),
   combined as coldest/average/warmest; optional pause (`paused_rooms_off`) when every readable thermostat is off.
+  That pause ignores MIN_ON_TIME (user's choice: switch off at once); re-applied every evaluation, so heating
+  switched on elsewhere while all are off goes off again (stale flag cleared, then paused in the same run).
+* Cooling mode (option `smart_cooling_thermostats_off`, default on): the unit is not touched, but every
+  evaluation switches any selected `climate` entity that is not off to `off` (`_keep_thermostats_off`, logbook).
+  Not restored on return to heating (user's choice), so heating then stays `paused_rooms_off` until one is on.
 * Early start (option, off by default): during a mild-day pause outside the window, the coldest counted room
   ≥ shortfall (1.0 °C) below target for a delay (30 min) resumes heating (`heating_early_start`); it ends when
   that room is within 0.3 °C and the minimum early run (45 min) has passed. Not applied to warm or rooms-off pauses.

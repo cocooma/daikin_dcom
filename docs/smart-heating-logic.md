@@ -11,7 +11,8 @@ flowchart TD
     start(["Poll / minute tick"]) --> en{"Smart heating<br/>control on?"}
     en -- no --> idle["Do nothing<br/>unit runs on its own settings"]
     en -- yes --> data{"Data ready and<br/>unit heating?"}
-    data -- "cooling / no data" --> idle2["Do nothing<br/>status: cooling_mode / waiting_for_data"]
+    data -- "no data" --> idle2["Do nothing<br/>status: waiting_for_data"]
+    data -- cooling --> cool["Leave the unit alone<br/>switch any selected thermostat that is on to off<br/>(option, logbook)<br/>status: cooling_mode"]
     data -- yes --> stale{"Space heating on but<br/>marked paused by us?"}
     stale -- yes --> clear["Clear the stale flag<br/>(logbook)"] --> user
     stale -- no --> user{"Space heating off<br/>and not paused by us?"}
@@ -24,7 +25,7 @@ flowchart TD
     dfr -- yes --> hold["Keep current on/off<br/>status: defrost / compressor_rest"]
     dfr -- no --> decide[["Pause decision (section 2)"]]
     decide --> apply{"Allowed?"}
-    apply -- "no, heating on,<br/>on ≥ 30 min" --> pause["reg 4 = 0 (pause)"]
+    apply -- "no, heating on, on ≥ 30 min<br/>(or at once if all thermostats off)" --> pause["reg 4 = 0 (pause)"]
     apply -- "yes, paused by us,<br/>off ≥ 20 min" --> resume["reg 4 = 1 (resume)"]
     apply -- "otherwise" --> keep["No change"]
     pause --> stats
@@ -42,7 +43,7 @@ with 0.5 °C hysteresis.
 ```mermaid
 flowchart TD
     q0{"Pause when all thermostats off<br/>is on, every readable thermostat off,<br/>and not switched off by us?"}
-    q0 -- yes --> roomsoff["Pause<br/>paused_rooms_off"]
+    q0 -- yes --> roomsoff["Pause at once<br/>(no 30 min minimum run)<br/>paused_rooms_off"]
     q0 -- no --> q1{"Outdoor avg ≥<br/>no space heating above?"}
     q1 -- yes --> warm["Pause<br/>paused_warm"]
     q1 -- no --> q2{"Window switch on,<br/>outdoor avg ≥ mild day above,<br/>outside the window?"}

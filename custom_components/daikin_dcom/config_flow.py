@@ -33,6 +33,7 @@ from .const import (
     CONF_SMART_ROOM_MODE,
     CONF_SMART_ROOM_SENSOR,
     CONF_SMART_ROOMS_OFF_PAUSE,
+    CONF_SMART_COOLING_STATS_OFF,
     CONF_SMART_EARLY_DELAY,
     CONF_SMART_EARLY_MIN_RUN,
     CONF_SMART_EARLY_SHORTFALL,
@@ -200,6 +201,9 @@ class DcomOptionsFlow(OptionsFlow):
                 ): _select(list(ROOM_MODES), "room_mode"),
                 vol.Required(
                     CONF_SMART_ROOMS_OFF_PAUSE, default=opts[CONF_SMART_ROOMS_OFF_PAUSE]
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_SMART_COOLING_STATS_OFF, default=opts[CONF_SMART_COOLING_STATS_OFF]
                 ): selector.BooleanSelector(),
                 vol.Required(
                     CONF_SMART_WARM_STATS_OFF, default=opts[CONF_SMART_WARM_STATS_OFF]

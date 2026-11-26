@@ -24,7 +24,10 @@ Rules
     DCOM / unit is not written to on every poll.
   * The controller only resumes heating it paused itself. If space heating
     is switched off by the user, it stays off.
-  * Nothing is touched in cooling mode or while defrosting.
+  * The unit is not touched in cooling mode or while defrosting. In cooling
+    mode the selected thermostats are kept off (option, on by default).
+  * All selected thermostats off -> heating paused ("rooms_off") at once,
+    without waiting for the minimum on time (option, on by default).
 
 The curve points are set at runtime through the "Heating curve ..." number
 entities (initial values from the integration options); thresholds and the
@@ -70,6 +73,7 @@ from .const import (
     CONF_SMART_ROOM_MODE,
     CONF_SMART_ROOM_SENSOR,
     CONF_SMART_ROOMS_OFF_PAUSE,
+    CONF_SMART_COOLING_STATS_OFF,
     ROOM_MODE_AVERAGE,
     ROOM_MODE_WARMEST,
     CONF_SMART_ROOM_TARGET,
@@ -151,6 +155,7 @@ class SmartSettings:
     room_max_offset: int
     room_mode: str
     rooms_off_pause: bool
+    cooling_stats_off: bool
     early_start: bool
     early_shortfall: float
     early_delay: timedelta
@@ -185,6 +190,7 @@ class SmartSettings:
             room_max_offset=int(o[CONF_SMART_ROOM_MAX_OFFSET]),
             room_mode=str(o[CONF_SMART_ROOM_MODE]),
             rooms_off_pause=bool(o[CONF_SMART_ROOMS_OFF_PAUSE]),
+            cooling_stats_off=bool(o[CONF_SMART_COOLING_STATS_OFF]),
             early_start=bool(o[CONF_SMART_EARLY_START]),
             early_shortfall=float(o[CONF_SMART_EARLY_SHORTFALL]),
             early_delay=timedelta(minutes=float(o[CONF_SMART_EARLY_DELAY])),
@@ -713,6 +719,20 @@ class SmartHeatingController:
         elif not self.paused_by_us and self.stats_off_by_us:
             await self._thermostats_on("heating restarted")
 
+    async def _keep_thermostats_off(self) -> None:
+        """Cooling mode: switch any selected thermostat that is on to off."""
+        on = []
+        for entity_id in self.settings.room_sensors:
+            if not entity_id.startswith("climate."):
+                continue
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state in ("off", STATE_UNKNOWN, STATE_UNAVAILABLE):
+                continue
+            on.append(entity_id)
+        if on:
+            await self._set_modes({e: "off" for e in on})
+            self._log("Cooling mode: thermostats switched off (" + ", ".join(on) + ")")
+
     async def _thermostats_off(self) -> None:
         saved: dict[str, str] = {}
         for entity_id in self.settings.room_sensors:
@@ -822,6 +842,8 @@ class SmartHeatingController:
         cooling = op == 2 or (op == 0 and c.value("i", I_OPERATION_MODE) == 2)
         if cooling:
             self.status = STATUS_COOLING
+            if self.settings.cooling_stats_off:
+                await self._keep_thermostats_off()
             return
         if onoff == 1 and self.paused_by_us:
             # Heating is on although we think we paused it: someone else switched it
@@ -883,7 +905,8 @@ class SmartHeatingController:
             None if self._last_onoff_change is None else now - self._last_onoff_change
         )
         if not allowed and onoff == 1:
-            if since is None or since >= MIN_ON_TIME:
+            # every thermostat switched off: no reason to finish the minimum run
+            if since is None or since >= MIN_ON_TIME or reason == "rooms_off":
                 await c.async_write(H_SPACE_ONOFF, 0)
                 self.paused_by_us = True
                 self._paused_reason = reason

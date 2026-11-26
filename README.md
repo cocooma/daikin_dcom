@@ -446,6 +446,10 @@ The status sensor's icon follows its state:
 
 An icon you set yourself on the entity (Settings → Entities) overrides these.
 
+The status survives a Home Assistant restart: the last status is shown until the controller has been restored
+and has read the unit (at most 2 min), instead of a brief `disabled` or `waiting_for_data`. The reason for a
+pause (warm, mild, thermostats off, no demand) is saved too.
+
 
 ### Behaviour and limits
 

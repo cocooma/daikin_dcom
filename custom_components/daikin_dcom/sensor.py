@@ -172,6 +172,24 @@ class DcomSmartTargetSensor(_SmartSensorBase):
         return {**smart.attributes, "curve_points": smart.curve_points}
 
 
+# icon of the smart heating status sensor, per status
+STATUS_ICONS = {
+    STATUS_DISABLED: "mdi:power-off",
+    STATUS_WAITING: "mdi:timer-sand",
+    STATUS_COOLING: "mdi:snowflake",
+    STATUS_USER_OFF: "mdi:radiator-off",
+    STATUS_DEFROST: "mdi:snowflake-melt",
+    STATUS_ACTIVE: "mdi:radiator",
+    STATUS_EARLY_START: "mdi:clock-fast",
+    STATUS_CLOUDY: "mdi:weather-cloudy-clock",
+    STATUS_PAUSED_WARM: "mdi:weather-sunny",
+    STATUS_PAUSED_MILD: "mdi:sun-clock",
+    STATUS_PAUSED_ROOMS_OFF: "mdi:thermometer-off",
+    STATUS_PAUSED_NO_DEMAND: "mdi:pause-circle-outline",
+    STATUS_COMPRESSOR_REST: "mdi:sleep",
+}
+
+
 class DcomSmartStatusSensor(_SmartSensorBase):
     """What the smart heating controller is doing.
 
@@ -208,6 +226,10 @@ class DcomSmartStatusSensor(_SmartSensorBase):
     @property
     def native_value(self):
         return self.coordinator.smart.status
+
+    @property
+    def icon(self) -> str:
+        return STATUS_ICONS.get(self.coordinator.smart.status, "mdi:heat-pump-outline")
 
 
 

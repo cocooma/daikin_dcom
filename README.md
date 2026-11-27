@@ -397,6 +397,10 @@ How it works:
 * If the water cools to 25 °C before the rest is over (cold day, all loops open), the unit restarts by itself;
   the rest then simply ends and the curve target comes back. The house needed the heat.
 * Hot water is never held back.
+* If smart heating **pauses space heating** (mild day outside the window, warm, thermostats off, no demand)
+  while a rest is running, the rest simply ends with the pause: no "rest over" entry and no setpoint change. While
+  smart heating holds space heating off, the leaving water setpoint is not written at all; the curve target is
+  written just before heating is switched back on.
 
 **Unit setting – circulation pump:** set **[F-0D] pump operation mode = 0 (Continuous)** in *Overview field
 settings*. Daikin switches the pump off whenever space heating is off, and in *Sample* mode (1) it only runs

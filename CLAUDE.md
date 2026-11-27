@@ -168,6 +168,10 @@ Nothing has been verified on real hardware by these checks; say so when reportin
   `v<version>` (HACS shows release tags; the manifest version is what it reports as installed).
 * `.github/workflows/validate.yml` runs the HACS action and hassfest on push, PRs and weekly.
 * HACS needs the repo to be public and to have a description and topics on GitHub.
+* Releases: the claude.ai cloud session can push branches and open PRs but may not push tags, create
+  releases or change repo settings. `.github/workflows/claude.yml` (anthropics/claude-code-action@v1, secret
+  `CLAUDE_CODE_OAUTH_TOKEN`, Claude GitHub App installed) lets `@claude` in an issue/PR do those from Actions,
+  e.g. "@claude publish release v1.1.0 from main".
 
 ## Working conventions
 

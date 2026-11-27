@@ -74,6 +74,7 @@ design decisions and working conventions behind it.
 `docs/smart-heating-logic.md` holds Mermaid flowcharts of the logic (rendered by GitHub; check syntax with
 `mmdc`). Update them when a rule below changes.
 
+
 * Only acts when enabled and the unit is heating; in cooling it only keeps the thermostats off (option); nothing during defrost.
 * Takes over the setpoint: reg 53 → 0 (previous mode remembered and restored on disable), reg 1 = curve
   value + room offset, clamped to 25..max LWT. Outdoor temperature (input 44) is an EMA with ~60 min τ.
@@ -176,6 +177,7 @@ Nothing has been verified on real hardware by these checks; say so when reportin
 ## Working conventions
 
 * One feature per branch, merged via pull request on GitHub (`cocooma/daikin_dcom`); don't commit to `main`.
-* Commits are authored as the repo owner (`Oszkar Nagy <oszkar_nagy@yahoo.co.uk>`) with the Claude co-author trailer.
-
+* Commits are authored as the repo owner (`Oszkar Nagy <oszkar_nagy@yahoo.co.uk>`) with the Claude co-author
+  trailer. No personal paths, hostnames, IP addresses or other email addresses in files or commit messages: the
+  repository is public.
 * Don't commit `__pycache__/` or scratch folders.

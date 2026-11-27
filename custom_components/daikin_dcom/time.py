@@ -22,6 +22,7 @@ async def async_setup_entry(
         [
             DcomSmartWindowTime(coordinator, "start"),
             DcomSmartWindowTime(coordinator, "end"),
+            DcomSmartChargeEndTime(coordinator),
         ]
     )
 
@@ -61,4 +62,33 @@ class DcomSmartWindowTime(DcomEntity, TimeEntity, RestoreEntity):
 
     async def async_set_value(self, value: time) -> None:
         self._apply(value.replace(second=0, microsecond=0))
+        self.async_write_ha_state()
+
+
+class DcomSmartChargeEndTime(DcomEntity, TimeEntity, RestoreEntity):
+    """When the evening slab charge must be finished (default 22:00)."""
+
+    _attr_icon = "mdi:clock-end"
+    _attr_name = "Smart heating slab charge end"
+
+    def __init__(self, coordinator: DcomCoordinator) -> None:
+        super().__init__(coordinator, "smart_slab_charge_end")
+        self._smart = coordinator.smart
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is None:
+            return
+        try:
+            self._smart.set_charge(end=time.fromisoformat(last.state))
+        except ValueError:
+            return
+
+    @property
+    def native_value(self) -> time:
+        return self._smart.settings.charge_end
+
+    async def async_set_value(self, value: time) -> None:
+        self._smart.set_charge(end=value.replace(second=0, microsecond=0))
         self.async_write_ha_state()

@@ -158,3 +158,8 @@ SMART_DEFAULTS = {
 
 # --- COP (needs an external electricity sensor; the DCOM has no power registers) ---
 CONF_COP_SENSOR = "cop_electricity_sensor"  # power (W/kW) or energy (Wh/kWh/MWh) sensor
+
+# --- heat demand forecast ---
+CONF_FORECAST_WEATHER = "forecast_weather_entity"  # empty = the cloudy-day weather entity
+CONF_FORECAST_SOLAR_TODAY = "forecast_solar_today"  # e.g. Solcast forecast today (kWh)
+CONF_FORECAST_SOLAR_TOMORROW = "forecast_solar_tomorrow"  # e.g. Solcast forecast tomorrow (kWh)

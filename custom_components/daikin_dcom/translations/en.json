@@ -44,7 +44,10 @@
           "smart_cloudy_weather_entity": "Smart heating: weather entity for the cloudy-day override (cloudy + a thermostat calling for heat = ignore the mild-day window); empty = off",
           "smart_cloudy_coverage": "Smart heating: cloud coverage that counts as cloudy (%) – used when the weather entity reports cloud_coverage",
           "smart_compressor_rest": "Smart heating: rest the compressor after the unit stops it",
-          "cop_electricity_sensor": "COP: heat pump electricity sensor – power (W/kW) or energy meter (kWh); empty = no COP"
+          "cop_electricity_sensor": "COP: heat pump electricity sensor – power (W/kW) or energy meter (kWh); empty = no COP",
+          "forecast_weather_entity": "Heat demand forecast: weather entity (hourly forecast); empty = the cloudy-day weather entity",
+          "forecast_solar_today": "Heat demand forecast: solar forecast for today in kWh (e.g. Solcast), optional",
+          "forecast_solar_tomorrow": "Heat demand forecast: solar forecast for tomorrow in kWh (e.g. Solcast), optional"
         },
         "description": "Smart heating settings are used when the 'Smart heating control' switch is on. Outdoor temperatures are averaged over about an hour. The heating curve points and the mild-day window are set on the dashboard with the 'Heating curve ...' and 'Smart heating window ...' entities. The compressor rest times are set on the dashboard with the 'Compressor rest …' entities."
       }
@@ -90,7 +93,9 @@
           "paused_no_demand": "Paused (no thermostat calling for heat)",
           "heating_early_start": "Heating (early start, cold room)",
           "heating_cloudy_override": "Heating (cloudy, thermostat calling)",
-          "compressor_rest": "Compressor resting"
+          "compressor_rest": "Compressor resting",
+          "paused_coasting": "Paused (soft landing: rooms will reach target)",
+          "heating_slab_charge": "Heating (evening slab charge)"
         }
       }
     }

@@ -7,10 +7,13 @@ the right. A legend row below the chart names the lines.
 
 Show it with the built-in Picture entity card. The picture is redrawn when
 the curve, thresholds, window or operating point change.
+
+A second image draws the heat demand forecast: predicted against actual heat
+per day for the last 14 days, today (so far) and tomorrow.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import math
 
 from homeassistant.components.image import ImageEntity
@@ -40,7 +43,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: DcomCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DcomCurveImage(hass, coordinator)])
+    async_add_entities([DcomCurveImage(hass, coordinator), DcomForecastImage(hass, coordinator)])
 
 
 def render_curve_svg(smart) -> str:
@@ -214,6 +217,141 @@ class DcomCurveImage(ImageEntity):
     @callback
     def _refresh(self) -> None:
         svg = render_curve_svg(self._smart)
+        if svg != self._svg:
+            self._svg = svg
+            self._attr_image_last_updated = dt_util.utcnow()
+            self.async_write_ha_state()
+
+    async def async_image(self) -> bytes | None:
+        return self._svg.encode()
+
+
+# --- heat demand forecast chart ------------------------------------------------------
+FW, FH = 640, 340
+FML, FMR, FMT, FMB = 48, 12, 30, 74  # bottom: day labels, legend row, summary row
+UNUSABLE = "rgba(158,158,158,0.55)"
+
+
+def _nice_step(top: float) -> float:
+    for step in (1, 2, 5, 10, 20, 25, 50, 100, 200):
+        if top / step <= 6:
+            return step
+    return 500
+
+
+def render_forecast_svg(fc) -> str:
+    """Predicted (orange) vs actual (blue) heat per day; today so far and tomorrow."""
+    today = dt_util.now().date()
+    days: list[dict] = []
+    for r in fc.records[-14:]:
+        days.append({"d": date.fromisoformat(r["date"]), "pred": r.get("predicted"),
+                     "act": r["heat"], "usable": r.get("usable", True), "kind": "past"})
+    days.append({"d": today, "pred": fc.predicted_today if fc.predicted_today is not None else fc.today_kwh,
+                 "act": round(fc.day["heat"]), "usable": True, "kind": "today"})
+    days.append({"d": today + timedelta(days=1), "pred": fc.tomorrow_kwh, "act": None,
+                 "usable": True, "kind": "tomorrow"})
+
+    values = [v for d in days for v in (d["pred"], d["act"]) if v is not None]
+    top = max(values + [1.0])
+    step = _nice_step(top)
+    y_max = math.ceil(top / step) * step
+    pw, ph = FW - FML - FMR, FH - FMT - FMB
+    slot = pw / len(days)
+    bar = min(14.0, slot * 0.34)
+
+    def y(v: float) -> float:
+        return FMT + ph - v / y_max * ph
+
+    out = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {FW} {FH}" '
+        f'font-family="sans-serif" font-size="12">',
+        f'<text x="{FML}" y="18" fill="{TEXT}">Heat for space heating per day (kWh): predicted vs actual</text>',
+    ]
+    v = 0.0
+    while v <= y_max + 1e-9:
+        out.append(f'<line x1="{FML}" y1="{y(v):.1f}" x2="{FML + pw}" y2="{y(v):.1f}" stroke="{GRID}"/>')
+        out.append(f'<text x="{FML - 6}" y="{y(v) + 4:.1f}" fill="{TEXT}" text-anchor="end">{v:g}</text>')
+        v += step
+    for i, d in enumerate(days):
+        cx = FML + slot * (i + 0.5)
+        if d["kind"] == "today":
+            out.append(f'<rect x="{FML + slot * i:.1f}" y="{FMT}" width="{slot:.1f}" height="{ph}" fill="{MILD}"/>')
+        if d["pred"] is not None:
+            dash = ' stroke-dasharray="4 3"' if d["kind"] == "tomorrow" else ""
+            fill = "none" if d["kind"] == "tomorrow" else CURVE
+            out.append(
+                f'<rect x="{cx - bar - 1:.1f}" y="{y(d["pred"]):.1f}" width="{bar:.1f}" '
+                f'height="{FMT + ph - y(d["pred"]):.1f}" fill="{fill}" fill-opacity="0.85" '
+                f'stroke="{CURVE}"{dash}/>'
+            )
+        if d["act"] is not None:
+            color = NOW if d["usable"] else UNUSABLE
+            opacity = "0.5" if d["kind"] == "today" else "0.9"
+            out.append(
+                f'<rect x="{cx + 1:.1f}" y="{y(d["act"]):.1f}" width="{bar:.1f}" '
+                f'height="{FMT + ph - y(d["act"]):.1f}" fill="{color}" fill-opacity="{opacity}"/>'
+            )
+        if d["kind"] == "past" and d["pred"] and d["act"] is not None and d["usable"] and slot >= 30:
+            err = 100 * (d["act"] - d["pred"]) / d["pred"]
+            out.append(
+                f'<text x="{cx:.1f}" y="{min(y(d["pred"]), y(d["act"])) - 4:.1f}" fill="{TEXT}" '
+                f'font-size="10" text-anchor="middle">{err:+.0f}%</text>'
+            )
+        label = "today" if d["kind"] == "today" else "tmrw" if d["kind"] == "tomorrow" else f'{d["d"].day}'
+        out.append(f'<text x="{cx:.1f}" y="{FMT + ph + 15}" fill="{TEXT}" text-anchor="middle" '
+                   f'font-size="11">{label}</text>')
+
+    ly = FMT + ph + 38
+    legend = [(CURVE, "predicted (day before)", False), (NOW, "actual", False),
+              (UNUSABLE, "not learnt from", False), (CURVE, "tomorrow", True)]
+    lx = FML
+    for color, text, dashed in legend:
+        if dashed:
+            out.append(f'<rect x="{lx}" y="{ly - 10}" width="12" height="10" fill="none" stroke="{color}" '
+                       f'stroke-dasharray="3 2"/>')
+        else:
+            out.append(f'<rect x="{lx}" y="{ly - 10}" width="12" height="10" fill="{color}"/>')
+        out.append(f'<text x="{lx + 17}" y="{ly}" fill="{TEXT}">{text}</text>')
+        lx += 17 + 7 * len(text) + 18
+
+    acc = fc.accuracy
+    parts = []
+    if acc.get("mean_error_pct") is not None:
+        parts.append(f'mean error {acc["mean_error_pct"]:.0f} % ({acc["days_compared"]} days)')
+    if fc.today_kwh is not None:
+        parts.append(f'today {fc.today_kwh:.0f} kWh ({fc.day["heat"]:.0f} so far)')
+    if fc.tomorrow_kwh is not None:
+        parts.append(f"tomorrow {fc.tomorrow_kwh:.0f} kWh")
+    if not parts or fc.model is None:
+        parts.insert(0, fc.status)
+    out.append(f'<text x="{FML}" y="{ly + 22}" fill="{NOW}">{" · ".join(parts)}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+class DcomForecastImage(ImageEntity):
+    """Heat demand: predicted vs actual per day (last 14 days, today, tomorrow)."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Heat demand forecast chart"
+    _attr_content_type = "image/svg+xml"
+    _attr_should_poll = False
+
+    def __init__(self, hass: HomeAssistant, coordinator: DcomCoordinator) -> None:
+        super().__init__(hass)
+        self._fc = coordinator.forecast
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_heat_forecast_chart"
+        self._attr_device_info = coordinator.device_info
+        self._svg = render_forecast_svg(self._fc)
+        self._attr_image_last_updated: datetime = dt_util.utcnow()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._fc.add_listener(self._refresh))
+
+    @callback
+    def _refresh(self) -> None:
+        svg = render_forecast_svg(self._fc)  # rounded to whole kWh: redrawn now and then, not every poll
         if svg != self._svg:
             self._svg = svg
             self._attr_image_last_updated = dt_util.utcnow()

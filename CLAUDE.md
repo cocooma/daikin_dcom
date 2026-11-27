@@ -163,6 +163,11 @@ design decisions and working conventions behind it.
   28 + wind sectors; rejects a ≤ 0, solar > 0, wind < 0 and falls back. Feature `hours` is the daily constant.
 * Forecast every 30 min via `weather.get_forecasts` (hourly, falls back to daily); today = measured so far +
   forecast rest; tomorrow's value is stored as the prediction for that date and compared when the day closes.
+* Graphs: sensors *Heat delivered today* and *Heat predicted for today* (plain measurements, no energy device
+  class, so a Statistics graph with stat type max / period day gives daily bars), *Heat demand forecast error*
+  (yesterday, %, positive = needed more); image entity *Heat demand forecast chart* (`render_forecast_svg` in
+  `image.py`, today's bar rounded to whole kWh so it isn't redrawn every poll). The forecaster notifies on every
+  update.
 * Options: `forecast_weather_entity` (empty → `smart_cloudy_weather_entity`), `forecast_solar_today`,
   `forecast_solar_tomorrow`. Intended next step (user agreed to watch accuracy first): let smart heating size the
   mild-day window from the forecast.

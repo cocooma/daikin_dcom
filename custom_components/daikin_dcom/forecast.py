@@ -327,12 +327,14 @@ class HeatForecaster:
             day["user_off_h"] += hours
         outdoor, wind, bearing = self._weather_now()
         if outdoor is None:
+            self._notify()
             return
         add_sample(day, hours, self._room_temperature(), outdoor, wind, bearing)
         solar = self._sensor_kwh(self.solar_today)
         if solar is not None:
             day["solar"] = solar  # the day's estimate; the last value of the day is kept
         self._save()
+        self._notify()
 
     def _close_day(self, day: dict[str, Any]) -> None:
         rec = dict(day)
@@ -500,6 +502,24 @@ class HeatForecaster:
         out["training_days"] = self.model["days"]
         out["fit_error_kwh"] = self.model["fit_mae"]
         return out
+
+    @property
+    def predicted_today(self) -> float | None:
+        """The forecast for today that was made yesterday (fixed for the day)."""
+        return self.predicted.get(dt_util.now().date().isoformat())
+
+    @property
+    def last_error(self) -> dict[str, Any] | None:
+        """Yesterday (or the last compared day): actual vs the day-before forecast."""
+        for r in reversed(self.records):
+            if r.get("predicted") is not None and r.get("usable"):
+                p = r["predicted"]
+                return {
+                    "date": r["date"], "actual_kwh": r["heat"], "predicted_kwh": p,
+                    "error_kwh": round(r["heat"] - p, 1),
+                    "error_pct": round(100 * (r["heat"] - p) / p) if p > 0 else None,
+                }
+        return None
 
     @property
     def history(self) -> list[dict[str, Any]]:

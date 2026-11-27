@@ -617,6 +617,47 @@ Attributes:
 
 Heat delivered ÷ COP gives the electricity, so with the COP sensor you can estimate tomorrow's consumption.
 
+#### Graphs: predicted vs actual
+
+Two ways to see how well the forecast does:
+
+**Chart image.** **Heat demand forecast chart** is an image entity (like the heating curve): one orange bar
+(predicted the day before) and one blue bar (actual) per day for the last 14 days, the error above each day, today
+(delivered so far, highlighted) and tomorrow (dashed). Days not learnt from are grey. Show it with a *Picture entity*
+card:
+
+```yaml
+type: picture-entity
+entity: image.daikin_altherma_3_heat_demand_forecast_chart
+show_state: false
+show_name: false
+```
+
+**Sensors for a Statistics graph.**
+
+| Sensor | Meaning |
+|---|---|
+| **Heat delivered today** | kWh delivered for space heating so far today (resets at midnight) |
+| **Heat predicted for today** | the forecast for today made the day before (fixed for the day) |
+| **Heat demand forecast error** | yesterday's error in %: (actual − predicted) / predicted, positive = the house needed more; attributes with the kWh and the 14-day mean error |
+
+Daily bars side by side:
+
+```yaml
+type: statistics-graph
+title: Heat per day – predicted vs actual
+entities:
+  - sensor.daikin_altherma_3_heat_predicted_for_today
+  - sensor.daikin_altherma_3_heat_delivered_today
+stat_types: [max]
+period: day
+days_to_show: 30
+chart_type: bar
+```
+
+(The entity IDs depend on your device name; pick the sensors in the card editor if they differ.) Add **Heat demand
+forecast error** in a second Statistics graph (stat type *mean*) or a History graph card to see the error per day.
+
 ## Notes
 
 * Register numbers are used as Modbus addresses directly (manual: "Register Base 0"). If every value looks

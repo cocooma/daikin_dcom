@@ -1,5 +1,8 @@
 # Daikin Altherma 3 – DCOM-LT/MB (Modbus TCP) for Home Assistant
 
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
+[![Validate](https://github.com/cocooma/daikin_dcom/actions/workflows/validate.yml/badge.svg)](https://github.com/cocooma/daikin_dcom/actions/workflows/validate.yml)
+
 Custom integration for a Daikin Altherma 3 heat pump with a Voytech **DCOM-LT/MB** module, reached through
 a Modbus TCP gateway. It exposes the DCOM's registers as Home Assistant entities and can optionally run its
 own heating curve with mild-day scheduling (**smart heating control**).
@@ -8,12 +11,21 @@ Requires Home Assistant 2024.4 or newer and `pymodbus` 3.6.9 or newer (installed
 
 ## Install
 
-**HACS:** HACS → ⋮ → *Custom repositories* → add `https://github.com/cocooma/daikin_dcom` as an
-*Integration*, install *Daikin Altherma 3 (DCOM-LT/MB Modbus TCP)* and restart Home Assistant.
+**HACS (recommended):**
+
+1. HACS → ⋮ → *Custom repositories* → add `https://github.com/cocooma/daikin_dcom`, type *Integration*.
+2. Find *Daikin Altherma 3 (DCOM-LT/MB Modbus TCP)* in HACS, download it and restart Home Assistant.
+3. Updates then show up in HACS (and under Settings → Updates). HACS offers the latest
+   [GitHub releases](https://github.com/cocooma/daikin_dcom/releases); without a release it follows `main`.
+
+HACS only works with public GitHub repositories.
 
 **Manual:** copy `custom_components/daikin_dcom` into your `config/custom_components/` and restart.
 
 Then: Settings → Devices & services → Add integration → *Daikin Altherma 3 (DCOM-LT/MB Modbus TCP)*.
+
+The integration ships its own icon (`custom_components/daikin_dcom/brand/`), shown by Home Assistant 2026.3 and
+newer.
 
 ## Setup
 

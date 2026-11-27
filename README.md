@@ -542,3 +542,7 @@ How it counts:
 
 Built from the DCOM-LT/MB reference manual (534-252-A3). The smart heating logic and the curve drawing have
 been checked with simulated data; please report anything that behaves differently on your unit.
+
+## License
+
+[MIT](LICENSE). Not affiliated with or endorsed by Daikin or Voytech.

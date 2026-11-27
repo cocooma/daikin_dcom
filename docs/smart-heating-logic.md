@@ -20,13 +20,13 @@ flowchart TD
     user -- no --> sp["Setpoint mode fixed (reg 53 = 0)<br/>target = curve(outdoor avg) + room correction<br/>clamped 25 °C … max LWT"]
     sp --> rest{"Compressor rest<br/>running?"}
     rest -- yes --> r25["reg 1 = 25 °C<br/>(space heating and pump stay on)"] --> dfr
-    rest -- no --> write["reg 1 = target<br/>(max every 10 min unless Δ ≥ 2 °C)"] --> dfr
+    rest -- no --> write["reg 1 = target<br/>(max every 10 min unless Δ ≥ 2 °C;<br/>not written while paused by us)"] --> dfr
     dfr{"Defrost /<br/>start-up?"}
     dfr -- yes --> hold["Keep current on/off<br/>status: defrost / compressor_rest"]
     dfr -- no --> decide[["Pause decision (section 2)"]]
     decide --> apply{"Allowed?"}
     apply -- "no, heating on, on ≥ 30 min<br/>(or at once if all thermostats off)" --> pause["reg 4 = 0 (pause)"]
-    apply -- "yes, paused by us,<br/>off ≥ 20 min" --> resume["reg 4 = 1 (resume)"]
+    apply -- "yes, paused by us,<br/>off ≥ 20 min" --> resume["reg 1 = curve target, then<br/>reg 4 = 1 (resume)"]
     apply -- "otherwise" --> keep["No change"]
     pause --> stats
     resume --> stats
@@ -84,6 +84,8 @@ flowchart TD
     c0(["Compressor stops (input 31: 1 → 0)"]) --> c1{"Space heating on, not hot water,<br/>not paused by us, stop &lt; 5 min ago?"}
     c1 -- no --> ign["Ignore<br/>(last_compressor_stop records why)"]
     c1 -- yes --> c2["Rest: reg 1 = 25 °C<br/>length from the rest curve (outdoor avg → minutes)<br/>logbook"]
-    c2 --> c3{"Rest time over, or the<br/>compressor restarted by itself?"}
+    c2 --> cp{"Smart heating paused<br/>space heating meanwhile?"}
+    cp -- yes --> cq["Rest ends silently<br/>(no setpoint write, no logbook)"]
+    cp -- no --> c3{"Rest time over, or the<br/>compressor restarted by itself?"}
     c3 -- yes --> c4["Write the curve target back<br/>logbook"]
 ```

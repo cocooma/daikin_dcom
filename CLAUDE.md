@@ -121,7 +121,9 @@ design decisions and working conventions behind it.
   logbook via `homeassistant.components.logbook.async_log_entry`, attached to the status sensor (its entity
   id is handed to the controller in `async_added_to_hass`); manifest has `after_dependencies: [logbook]`. Space heating stays on (so the pump keeps running with [F-0D] = 0) and reg 1 is set
   to 25 °C; the curve target is written back when the rest ends or the unit restarts by itself. Stops older than
-  5 min when handled are ignored. Starts are counted in `_track_compressor`, called from `_schedule` on every
+  5 min when handled are ignored. While the controller holds space heating off (`paused_by_us` and reg 4 = 0) a running rest is
+  dropped silently and reg 1 is not written at all (user: no setpoint activity during the mild-day pause); the resume
+  branch writes the curve target to reg 1 before reg 4 = 1. Starts are counted in `_track_compressor`, called from `_schedule` on every
   update even when the controller is disabled; counts persist in the switch's restore data.
 * Runtime state (enabled, paused_by_us, paused_reason, room offset, previous mode) persists through the switch's restore
   data. The status sensor is a RestoreEntity: `hold_status()` shows its last state until `restore()` has run and an

@@ -494,6 +494,13 @@ class SmartHeatingController:
                 )
             self.rest_until = None
             return False
+        if self.paused_by_us and c.value("h", H_SPACE_ONOFF) == 0:
+            # we paused space heating: a rest has nothing left to do, and writing
+            # the curve target back would be pointless setpoint activity
+            if self.rest_until is not None:
+                _LOGGER.debug("Smart heating: compressor rest dropped, heating paused")
+            self.rest_until = None
+            return False
         if stop is not None and c.value("h", H_SPACE_ONOFF) == 1:
             self.rest_until = stop + self.rest_time
             minutes = int(self.rest_time.total_seconds() // 60)
@@ -916,7 +923,8 @@ class SmartHeatingController:
             # keep space heating (and the pump) on, but below the water temperature
             target = LWT_FLOOR
         current = c.value("h", H_LWT_HEAT_SP)
-        due = (
+        paused = self.paused_by_us and c.value("h", H_SPACE_ONOFF) == 0
+        due = not paused and (
             resting
             or self._last_setpoint_write is None
             or now - self._last_setpoint_write >= SETPOINT_MIN_INTERVAL
@@ -948,6 +956,11 @@ class SmartHeatingController:
                 self._last_onoff_change = now
         elif allowed and onoff == 0 and self.paused_by_us:
             if since is None or since >= MIN_OFF_TIME:
+                # setpoint is left alone while paused: put the curve target in first,
+                # so the unit doesn't restart against a stale (e.g. 25 °C rest) value
+                if c.value("h", H_LWT_HEAT_SP) != self.target_lwt:
+                    await c.async_write(H_LWT_HEAT_SP, self.target_lwt)
+                    self._last_setpoint_write = now
                 await c.async_write(H_SPACE_ONOFF, 1)
                 self.paused_by_us = False
                 self._paused_reason = None

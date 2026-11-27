@@ -117,6 +117,9 @@ async def async_setup_entry(
             DcomThermalPowerSensor(coordinator),
             DcomSlabTemperatureSensor(coordinator),
             DcomHeatForecastSensor(coordinator, "today"),
+            DcomHeatGraphSensor(coordinator, "delivered"),
+            DcomHeatGraphSensor(coordinator, "predicted"),
+            DcomHeatForecastErrorSensor(coordinator),
             DcomHeatForecastSensor(coordinator, "tomorrow"),
             *(
                 [DcomElectricalPowerSensor(coordinator), DcomCopSensor(coordinator)]
@@ -417,3 +420,66 @@ class DcomSlabTemperatureSensor(_SmartSensorBase):
         age = (dt_util.utcnow() - smart.slab_measured).total_seconds() / 60
         return {"measured": dt_util.as_local(smart.slab_measured).strftime("%H:%M"),
                 "age_minutes": round(age)}
+
+
+class DcomHeatGraphSensor(DcomEntity, SensorEntity):
+    """For graphs: heat delivered today, and the forecast for today made yesterday.
+
+    Both are plain measurements (no energy device class) so a Statistics graph
+    card with stat type "max" and period "day" shows one bar per day for each.
+    """
+
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: DcomCoordinator, which: str) -> None:
+        super().__init__(coordinator, f"heat_{which}_today")
+        self._which = which
+        if which == "delivered":
+            self._attr_name = "Heat delivered today"
+            self._attr_icon = "mdi:radiator"
+        else:
+            self._attr_name = "Heat predicted for today"
+            self._attr_icon = "mdi:crystal-ball"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self.coordinator.forecast.add_listener(self.async_write_ha_state))
+
+    @property
+    def native_value(self):
+        f = self.coordinator.forecast
+        if self._which == "delivered":
+            return round(f.day["heat"], 2)
+        return f.predicted_today
+
+
+class DcomHeatForecastErrorSensor(DcomEntity, SensorEntity):
+    """Yesterday's forecast error: (actual - predicted) / predicted, in %.
+
+    Positive = the house needed more heat than forecast."""
+
+    _attr_name = "Heat demand forecast error"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:target-variant"
+
+    def __init__(self, coordinator: DcomCoordinator) -> None:
+        super().__init__(coordinator, "heat_forecast_error")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self.coordinator.forecast.add_listener(self.async_write_ha_state))
+
+    @property
+    def native_value(self):
+        last = self.coordinator.forecast.last_error
+        return None if last is None else last["error_pct"]
+
+    @property
+    def extra_state_attributes(self):
+        f = self.coordinator.forecast
+        attrs = dict(f.last_error or {})
+        attrs.update(f.accuracy)
+        return attrs

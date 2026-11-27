@@ -34,6 +34,7 @@ async def async_setup_entry(
             ),
             *(DcomCurveNumber(coordinator, *spec) for spec in CURVE_NUMBERS),
             *(DcomRestNumber(coordinator, *spec) for spec in REST_NUMBERS),
+            DcomSoftToleranceNumber(coordinator),
         ]
     )
 
@@ -179,4 +180,35 @@ class DcomRestNumber(DcomEntity, RestoreNumber):
                 "The mild point outdoor temperature must be higher than the cold point's."
             )
         self._smart.set_rest(self._field, value)
+        self.async_write_ha_state()
+
+
+class DcomSoftToleranceNumber(DcomEntity, RestoreNumber):
+    """Soft landing tolerance: how far the rooms may head above / fall below target.
+
+    Smaller = closer to target but more compressor starts."""
+
+    _attr_name = "Smart heating soft landing tolerance"
+    _attr_icon = "mdi:arrow-collapse-vertical"
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_native_min_value = 0.2
+    _attr_native_max_value = 1.5
+    _attr_native_step = 0.1
+
+    def __init__(self, coordinator: DcomCoordinator) -> None:
+        super().__init__(coordinator, "smart_soft_tolerance")
+        self._smart = coordinator.smart
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is not None and last.native_value is not None:
+            self._smart.set_soft_tolerance(min(1.5, max(0.2, float(last.native_value))))
+
+    @property
+    def native_value(self) -> float:
+        return self._smart.settings.soft_tolerance
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._smart.set_soft_tolerance(value)
         self.async_write_ha_state()

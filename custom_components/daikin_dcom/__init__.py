@@ -17,6 +17,7 @@ from .const import (
 from .coordinator import DcomCoordinator
 from .modbus_client import DcomClient
 from .cop import CopTracker
+from .forecast import HeatForecaster
 from .smart import SmartHeatingController
 
 PLATFORMS = [
@@ -49,6 +50,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.smart.start()
     coordinator.cop = CopTracker(hass, entry.options, coordinator)
     coordinator.cop.start()
+    coordinator.forecast = HeatForecaster(hass, entry, coordinator)
+    await coordinator.forecast.async_load()
+    coordinator.forecast.start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -65,5 +69,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator: DcomCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         coordinator.smart.stop()
         coordinator.cop.stop()
+        coordinator.forecast.stop()
         await coordinator.client.close()
     return unload_ok

@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfPower, UnitOfTemperature, UnitOfVolumeFlowRate
+from homeassistant.const import UnitOfEnergy, UnitOfPower, UnitOfTemperature, UnitOfVolumeFlowRate
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
@@ -40,8 +40,10 @@ from .smart import (
     STATUS_DISABLED,
     STATUS_EARLY_START,
     STATUS_PAUSED_MILD,
+    STATUS_PAUSED_COAST,
     STATUS_PAUSED_NO_DEMAND,
     STATUS_PAUSED_ROOMS_OFF,
+    STATUS_SLAB_CHARGE,
     STATUS_PAUSED_WARM,
     STATUS_USER_OFF,
     STATUS_WAITING,
@@ -113,6 +115,9 @@ async def async_setup_entry(
             DcomSmartStatusSensor(coordinator),
             DcomCompressorStartsSensor(coordinator),
             DcomThermalPowerSensor(coordinator),
+            DcomSlabTemperatureSensor(coordinator),
+            DcomHeatForecastSensor(coordinator, "today"),
+            DcomHeatForecastSensor(coordinator, "tomorrow"),
             *(
                 [DcomElectricalPowerSensor(coordinator), DcomCopSensor(coordinator)]
                 if coordinator.cop.has_meter
@@ -186,6 +191,8 @@ STATUS_ICONS = {
     STATUS_PAUSED_MILD: "mdi:sun-clock",
     STATUS_PAUSED_ROOMS_OFF: "mdi:thermometer-off",
     STATUS_PAUSED_NO_DEMAND: "mdi:pause-circle-outline",
+    STATUS_PAUSED_COAST: "mdi:airplane-landing",
+    STATUS_SLAB_CHARGE: "mdi:battery-charging-high",
     STATUS_COMPRESSOR_REST: "mdi:sleep",
 }
 
@@ -220,6 +227,8 @@ class DcomSmartStatusSensor(_SmartSensorBase, RestoreEntity):
         STATUS_PAUSED_MILD,
         STATUS_PAUSED_ROOMS_OFF,
         STATUS_PAUSED_NO_DEMAND,
+        STATUS_PAUSED_COAST,
+        STATUS_SLAB_CHARGE,
         STATUS_COMPRESSOR_REST,
     ]
 
@@ -340,3 +349,71 @@ class DcomCopSensor(_CopSensorBase):
     @property
     def extra_state_attributes(self):
         return self.coordinator.cop.attributes
+
+
+# --- heat demand forecast ----------------------------------------------------------
+class DcomHeatForecastSensor(DcomEntity, SensorEntity):
+    """Predicted space heating need (heat delivered, kWh) for today or tomorrow."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:home-thermometer-outline"
+
+    def __init__(self, coordinator: DcomCoordinator, day: str) -> None:
+        super().__init__(coordinator, f"heat_forecast_{day}")
+        self._day = day
+        self._attr_name = f"Heat demand forecast {day}"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self.coordinator.forecast.add_listener(self.async_write_ha_state))
+
+    @property
+    def native_value(self):
+        f = self.coordinator.forecast
+        return f.today_kwh if self._day == "today" else f.tomorrow_kwh
+
+    @property
+    def extra_state_attributes(self):
+        f = self.coordinator.forecast
+        attrs = {"model": f.status}
+        if self._day == "today":
+            attrs["delivered_so_far_kwh"] = round(f.day["heat"], 1)
+            if f.today_kwh is not None:
+                attrs["remaining_kwh"] = round(max(0.0, f.today_kwh - f.day["heat"]), 1)
+            attrs.update(f.today_inputs)
+        else:
+            attrs.update(f.tomorrow_inputs)
+            attrs.update(f.model_summary)
+            attrs.update(f.accuracy)
+            attrs["last_days"] = f.history
+        return attrs
+
+
+class DcomSlabTemperatureSensor(_SmartSensorBase):
+    """Floor slab temperature, estimated from the return water while it circulates
+    with the compressor off (needs the pump running continuously, [F-0D] = 0)."""
+
+    _attr_name = "Floor slab temperature (estimated)"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:heating-coil"
+
+    def __init__(self, coordinator: DcomCoordinator) -> None:
+        super().__init__(coordinator, "slab_temperature")
+
+    @property
+    def native_value(self):
+        return self.coordinator.smart.slab_temp
+
+    @property
+    def extra_state_attributes(self):
+        smart = self.coordinator.smart
+        if smart.slab_measured is None:
+            return {"measured": None}
+        from homeassistant.util import dt as dt_util
+        age = (dt_util.utcnow() - smart.slab_measured).total_seconds() / 60
+        return {"measured": dt_util.as_local(smart.slab_measured).strftime("%H:%M"),
+                "age_minutes": round(age)}

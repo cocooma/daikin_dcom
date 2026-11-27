@@ -18,7 +18,7 @@ flowchart TD
     stale -- no --> user{"Space heating off<br/>and not paused by us?"}
     user -- yes --> respect["Leave it off<br/>status: space_heating_off"]
     user -- no --> sp["Setpoint mode fixed (reg 53 = 0)<br/>target = curve(outdoor avg) + room correction<br/>clamped 25 °C … max LWT"]
-    sp --> rest{"Compressor rest<br/>running?"}
+    sp --> rest{"Compressor rest or<br/>soft landing (coasting)?"}
     rest -- yes --> r25["reg 1 = 25 °C<br/>(space heating and pump stay on)"] --> dfr
     rest -- no --> write["reg 1 = target<br/>(max every 10 min unless Δ ≥ 2 °C;<br/>not written while paused by us)"] --> dfr
     dfr{"Defrost /<br/>start-up?"}
@@ -52,10 +52,13 @@ flowchart TD
     q3 -- yes --> cloudy["heating_cloudy_override<br/>(ends 15 min after the conditions stop)"] --> dem
     q3 -- no --> q4{"Early start on and the coldest room<br/>≥ shortfall below target for the delay?"}
     q4 -- yes --> early["heating_early_start<br/>(until within 0.3 °C and min run done)"] --> dem
-    q4 -- no --> mild["Pause<br/>paused_mild_outside_window"]
+    q4 -- no --> mild["Pause<br/>paused_mild_outside_window"] --> chg
     dem{"Heat only on thermostat demand switch on,<br/>a thermostat readable, none held off by us,<br/>and none calling for 10 min?"}
-    dem -- yes --> nodemand["Pause<br/>paused_no_demand"]
+    dem -- yes --> nodemand["Pause<br/>paused_no_demand"] --> chg
     dem -- no --> heat["Heat<br/>heating / override status"]
+    chg{"Evening slab charge planned now<br/>and rooms not 1 °C above target?"}
+    chg -- yes --> charge["Heat<br/>heating_slab_charge<br/>(setpoint ≥ room target + 6 °C)"]
+    chg -- no --> stay["Stay paused"]
 ```
 
 ## 3. Thermostats in warm weather
@@ -88,4 +91,20 @@ flowchart TD
     cp -- yes --> cq["Rest ends silently<br/>(no setpoint write, no logbook)"]
     cp -- no --> c3{"Rest time over, or the<br/>compressor restarted by itself?"}
     c3 -- yes --> c4["Write the curve target back<br/>logbook"]
+```
+
+## 5. Soft landing and evening slab charge
+
+```mermaid
+flowchart TD
+    s0(["Space heating on, rooms at target"]) --> s1{"Soft landing on and rooms heading<br/>more than the tolerance above target<br/>within 2 h (trend of the last hour)?"}
+    s1 -- yes --> s2["Coasting: setpoint 25 °C, pump keeps running<br/>status paused_coasting, logbook"]
+    s2 --> s3{"Rooms the tolerance below target,<br/>3 h passed or an evening charge?"}
+    s3 -- yes --> s4["Normal setpoint again"]
+    s1 -- no --> s4
+    e0(["Every evaluation until the charge starts"]) --> e1{"Evening slab charge on?"}
+    e1 -- yes --> e2{"Floor already warm<br/>(slab ≥ room target + 2.5 °C)?"}
+    e2 -- yes --> e3["No charge today"]
+    e2 -- no --> e4["Minutes = night heat need (forecast)<br/>÷ heat output, 30–240 min<br/>(90 min while the forecast learns)"]
+    e4 --> e5["Heat from end time − minutes<br/>until the end time (22:00)"]
 ```

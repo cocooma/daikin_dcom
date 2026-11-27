@@ -259,6 +259,10 @@ Set from the dashboard rather than the options; changes apply immediately and ar
 | Smart heating window start / end (time) | 11:00 / 17:00 | On mild days heating runs only in this window. Pick the warmest hours for the best COP. May cross midnight; start = end means all day |
 | Smart heating mild-day window (switch) | on | Off: no time restriction on mild days; only the "no space heating above" limit applies |
 | Smart heating heat only on thermostat demand (switch) | off | On: space heating only runs while a selected thermostat calls for heat, see [Heat only on thermostat demand](#heat-only-on-thermostat-demand-optional) |
+| Smart heating soft landing (switch) | off | Ends a run early when the rooms will reach target from the floor's stored heat, see [Soft landing](#soft-landing-optional) |
+| Smart heating soft landing tolerance (number) | 0.5 °C | How far the rooms may head above / fall below target before soft landing acts |
+| Smart heating evening slab charge (switch) | off | Charges the floor in the evening for the night, see [Evening slab charge](#evening-slab-charge-optional) |
+| Smart heating slab charge end (time) | 22:00 | When the evening charge must be finished |
 | Smart heating cloudy-day override (switch) | on | On: cloudy **and** a thermostat calling for heat lifts the window (needs the weather entity option, see [Cloudy-day override](#cloudy-day-override-optional)) |
 
 ### Early start for cold rooms (optional)
@@ -354,6 +358,52 @@ With underfloor heating the room responds slowly, so expect fewer, longer runs, 
 thermostats are satisfied. Thermostats with a small hysteresis (0.2–0.3 °C) will start the heat pump often; a
 larger one gives longer runs.
 
+### Floor slab temperature (estimated)
+
+The **Floor slab temperature (estimated)** sensor shows how warm the floor is, without a floor probe. With the pump
+running continuously ([F-0D] = 0), the water coming back from the floor has the floor's temperature once the
+compressor has been off for 10 minutes; the sensor takes the return water temperature then. It is only measured
+while water circulates with space heating on (between runs, during a compressor rest or soft landing), so it keeps
+its last value in between: the `measured` / `age_minutes` attributes say when. Decisions ignore values older than
+3 hours. It also learns the heat output while the compressor runs (`heat_output_while_running_kw` on the target LWT
+sensor), used to plan the evening charge.
+
+### Soft landing (optional)
+
+Underfloor heating keeps releasing heat for hours after a run, so the rooms tend to overshoot after the thermostats
+are satisfied. With the **Smart heating soft landing** switch on, the controller watches how fast the rooms are
+warming (trend over the last hour) and, once they have reached target and are heading more than the **tolerance**
+(default 0.5 °C) above it within 2 hours, holds the setpoint at 25 °C and lets the floor finish the job, like a
+compressor rest: space heating and the pump stay on, so the floor keeps evening out. Normal heating resumes when
+the rooms fall the tolerance below target (or after 3 hours). Status `paused_coasting`, with logbook entries.
+
+The unit can't run below about 5 kW, so every early stop means one more start later. In a simulation of this house
+at 8 °C outside, soft landing kept the rooms within 22.4–23.1 °C instead of 22.4–24.0 °C and used about 11 % less
+heat, but the compressor started 7 times a day instead of 4. A larger tolerance means fewer starts and a wider band.
+
+### Evening slab charge (optional)
+
+On a mild night the controller may keep heating paused until the window opens next day. The rooms stay warm for a
+while, but the floor cools down. With the **Smart heating evening slab charge** switch on, the controller charges
+the floor in the evening so it lasts the night:
+
+* It plans a charge that ends at **Smart heating slab charge end** (default 22:00). The length comes from the
+  [heat demand forecast](#heat-demand-forecast): the heat the house needs from the end time until the window opens
+  next day (or for 9 hours when the window is off), divided by the heat pump's output, 30 min to 4 hours. Until the
+  forecast has learnt, it uses a fixed 90 minutes (below *no space heating above*). The plan is shown in the
+  `slab_charge_plan` attribute of the target LWT sensor.
+* No charge when the floor is already warm (estimated slab temperature at least 2.5 °C above the room target) or
+  the night needs little heat.
+* During the charge heating runs even on a mild day outside the window, and the setpoint is at least the room
+  target + 6 °C (capped at max LWT); otherwise, at mild temperatures, the curve is too close to the floor
+  temperature for the unit to start. It also lifts soft landing and the "no demand" pause, but not the warm cut-off
+  or the all-thermostats-off pause, and no compressor rest starts meanwhile.
+* It holds while the rooms are more than 1 °C above target and continues when they cool, until the end time.
+* Status `heating_slab_charge`, with logbook entries.
+
+In a simulation of a mild night (11.5–14.5 °C outside, window 11:00–17:00) the floor was 1.6 °C warmer at 06:00 and
+the coldest room temperature 20.7 °C instead of 19.4 °C, for 14 kWh more heat and two more compressor starts.
+
 ### Thermostats off in warm weather (optional)
 
 With **Smart heating: switch the selected thermostats off while heating is paused for warm weather** enabled,
@@ -445,7 +495,7 @@ on and off to see its effect.
 |---|---|
 | Smart heating control (switch) | Enables the controller; its state is restored after a restart. Attribute `status` |
 | Smart heating target LWT (sensor) | Setpoint the controller writes to reg 1. Attributes: averaged outdoor temperature, curve value, room correction, thresholds, window and `curve_points` |
-| Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `heating_cloudy_override` (cloudy and a thermostat calling, window not enforced), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `paused_no_demand` (no thermostat calling, demand-only switch on), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
+| Smart heating status (sensor) | `heating`, `compressor_rest` (holding off a restart after the unit's own stop), `heating_early_start` (a cold room started heating outside the window), `heating_cloudy_override` (cloudy and a thermostat calling, window not enforced), `paused_mild_outside_window`, `paused_warm`, `paused_rooms_off` (all selected thermostats off), `paused_no_demand` (no thermostat calling, demand-only switch on), `paused_coasting` (soft landing: setpoint held at 25 °C), `heating_slab_charge` (evening slab charge), `space_heating_off` (switched off by you), `cooling_mode`, `defrost`, `waiting_for_data` or `disabled` |
 | Heating curve (image) | The curve drawn as a picture; see below |
 
 The status sensor's icon follows its state:
@@ -524,6 +574,48 @@ How it counts:
 * The 15 min COP is empty while a mode hardly ran (less than 0.02 kWh of electricity in the window). Gaps over
   5 min (restart, outage) are skipped. Totals survive restarts; "today" resets at local midnight.
 * At a 3 °C ΔT, a 0.3 °C error in either water sensor is about 10 % on the COP: read the daily values as a trend.
+
+## Heat demand forecast
+
+Two sensors predict how much heat the house needs for **space heating**: **Heat demand forecast today** and
+**Heat demand forecast tomorrow** (kWh of heat delivered, not electricity). They only predict; nothing is
+controlled by them (yet).
+
+Setup, in **Configure**:
+
+* **Heat demand forecast: weather entity**: a weather entity with an hourly forecast, e.g. `weather.forecast_home`.
+  Empty = the cloudy-day override's weather entity.
+* **Solar forecast today / tomorrow** (optional): energy sensors in kWh, e.g. Solcast's *forecast today* and
+  *forecast tomorrow*. Sunny days need less heat (solar gain through the windows).
+
+How it learns:
+
+* Every day it records the heat delivered for space heating (from *Thermal power*, so heating mode only; hot water
+  and cooling are left out) and what drove it: **degree-hours** (room minus outdoor temperature, summed over the
+  day), **wind** (speed × temperature difference, also split by wind direction: N, E, S, W), the day's **solar
+  forecast**, and a daily constant (internal gains, standing losses).
+* Outdoor temperature and wind come from the weather entity, the same source as the forecast, so history and
+  forecast match. Room temperature is the average of the rooms used for room correction (thermostats switched on,
+  sensors), otherwise the room target.
+* It fits *heat = a·degree-hours + b·wind·degree-hours − c·solar + d* (least squares). The model grows with the
+  data: temperature (+ sun) from **7 days**, + wind from **14 days**, + wind direction from **28 days**. Until 7 days
+  are collected the sensors are *unknown* and the `model` attribute says `learning: n of 7 days`.
+* Days with fewer than 20 measured hours, space heating switched off by hand for more than 2 hours, or cooling are
+  not learnt from. Up to 180 days are kept (across restarts).
+* In a simulation with 7 % random day-to-day noise the forecast error went from about 20 % after a week to about
+  10 % after three weeks and 6–7 % after four. Real houses add effects the model doesn't see (open windows, guests,
+  cooking), so expect a few percent more.
+
+Attributes:
+
+* **today**: `delivered_so_far_kwh`, `remaining_kwh`, and the inputs used (degree-hours, mean temperature
+  difference, mean wind, solar). Today's value combines what was measured so far with the forecast for the rest of
+  the day.
+* **tomorrow**: the inputs, what the model has learnt about the house (`kwh_per_degree_day`, extra heat per m/s of
+  wind overall or per direction, `kwh_saved_per_solar_kwh`), `mean_error_kwh` / `mean_error_pct` (forecast made the
+  day before against what was actually delivered, last 14 days) and `last_days`.
+
+Heat delivered ÷ COP gives the electricity, so with the COP sensor you can estimate tomorrow's consumption.
 
 ## Notes
 

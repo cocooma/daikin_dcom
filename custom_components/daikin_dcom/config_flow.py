@@ -40,6 +40,9 @@ from .const import (
     CONF_SMART_EARLY_START,
     CONF_SMART_REST,
     CONF_COP_SENSOR,
+    CONF_FORECAST_SOLAR_TODAY,
+    CONF_FORECAST_SOLAR_TOMORROW,
+    CONF_FORECAST_WEATHER,
     CONF_SMART_WEATHER_ENTITY,
     CONF_SMART_CLOUD_COVERAGE,
     CONF_SMART_WARM_STATS_OFF,
@@ -155,6 +158,8 @@ class DcomOptionsFlow(OptionsFlow):
             else:
                 user_input.setdefault(CONF_SMART_ROOM_SENSOR, [])
                 user_input.setdefault(CONF_COP_SENSOR, "")
+                for key in (CONF_FORECAST_WEATHER, CONF_FORECAST_SOLAR_TODAY, CONF_FORECAST_SOLAR_TOMORROW):
+                    user_input.setdefault(key, "")
                 user_input.setdefault(CONF_SMART_WEATHER_ENTITY, "")
                 return self.async_create_entry(data=user_input)
 
@@ -250,6 +255,19 @@ class DcomOptionsFlow(OptionsFlow):
                         ]
                     )
                 ),
+                # --- heat demand forecast ---
+                vol.Optional(
+                    CONF_FORECAST_WEATHER,
+                    description={"suggested_value": entry.options.get(CONF_FORECAST_WEATHER) or None},
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="weather")),
+                vol.Optional(
+                    CONF_FORECAST_SOLAR_TODAY,
+                    description={"suggested_value": entry.options.get(CONF_FORECAST_SOLAR_TODAY) or None},
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+                vol.Optional(
+                    CONF_FORECAST_SOLAR_TOMORROW,
+                    description={"suggested_value": entry.options.get(CONF_FORECAST_SOLAR_TOMORROW) or None},
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
                 vol.Required(
                     CONF_SMART_ROOM_TARGET, default=opts[CONF_SMART_ROOM_TARGET]
                 ): _num(15, 28, 0.5),

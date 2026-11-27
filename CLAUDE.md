@@ -62,9 +62,10 @@ design decisions and working conventions behind it.
 | `smart.py` | `SmartHeatingController`: HA-side curve, mild-day window, warm cut-off, room correction, early start, compressor rest |
 | `image.py` | `render_curve_svg()` + image entity drawing the curve and operating point |
 | `number.py` | Weather offsets (54/55) and the four smart heating curve point numbers |
-| `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, cloudy-day override switch, demand-only switch, quiet mode |
+| `time.py` / `switch.py` | Window start/end; smart heating switch, window switch, cloudy-day override, demand-only, soft landing and evening charge switches, charge end time, quiet mode |
 | `sensor.py` | Temperatures, flow, error codes, smart target LWT, status, compressor starts, COP, thermal and electrical power |
 | `cop.py` | `CopTracker`: thermal power from flow × ΔT, electricity from the configured sensor, per-mode COP |
+| `forecast.py` | `HeatForecaster`: daily heat-demand records (Store), least-squares model, forecast today/tomorrow from the weather entity's hourly forecast |
 | `config_flow.py` | Setup and options (control mode, poll interval, max LWT, mild/off thresholds, room sensor) |
 
 `coordinator.smart` holds the controller; it is created in `__init__.py` before the platforms are set up.
@@ -134,6 +135,37 @@ design decisions and working conventions behind it.
   room sensor in the options (reload). Old option values for the curve/window act as initial values.
 * Defaults: −5 °C → 34 °C, 15 °C → 26 °C, max 40 °C, mild 12 °C, off 16 °C, window 11:00–17:00,
   room target 22 °C, max correction 3 °C.
+
+* Slab estimate (`_update_slab`): return water (input 42) once the compressor has been off ≥ SLAB_SETTLE = 10 min
+  with pump on, flow > 0, reg 4 = 1, not DHW; smoothed; decisions ignore it after 3 h (no floor probes in this
+  house - user confirmed). Also learns `run_kw` (EMA of thermal kW while the compressor runs; persisted).
+* Soft landing (restore switch, default off; tolerance number 0.2–1.5, default 0.5): `_update_coasting` in step 2.
+  Room trend = d(room_error)/dh over the last hour (≥ 20 min). Coast when room_error ≤ 0 and error + trend·2 h ≤
+  −tolerance; holds reg 1 at 25 °C like a rest (no reg 4 toggle - pausing stopped the pump and the slab estimate);
+  ends at error ≥ tolerance, 3 h, or a charge. Simulation: fewer overshoots, ~11 % less heat, but ~2× starts (unit
+  minimum ~5 kW) - hence the tolerance.
+* Evening slab charge (restore switch, default off; end time entity, default 22:00): `_plan_charge` re-plans each
+  evaluation until start, then freezes for the day; minutes = forecast `need_kwh(end, next window start or +9 h)` /
+  run_kw, 30–240 (fallback 90 while the forecast learns; none if slab ≥ room target + 2.5). `_charge` lifts mild,
+  no-demand and coasting (not warm / rooms-off), setpoint ≥ room target + 6 (curve minus room offset was too low to
+  start the unit at mild temperatures - found in simulation), holds (not cancels) while rooms > 1 °C above target,
+  no new compressor rest meanwhile.
+
+## Heat demand forecast (`forecast.py`, prediction only)
+
+* Daily records in `homeassistant.helpers.storage.Store` (`daikin_dcom.<entry>.heat_forecast`, 180 days):
+  heat = space-heating thermal kWh (COP tracker, heating mode), degree-hours (room − outdoor), wind × ΔT total and
+  per sector N/E/S/W (bearing split between the two nearest), hours, the day's solar forecast (last value of the
+  "solar today" sensor). Outdoor temperature and wind come from the weather entity (same source as the forecast),
+  room temperature from the smart controller's rooms (on, available) or the room target.
+* Usable day: ≥ 20 h measured, ≤ 2 h space heating off by hand, ≤ 1 h cooling.
+* `fit()`: ridge-lightened least squares, pure Python (no numpy). Tiers: 7 days temperature (+ solar), 14 + wind,
+  28 + wind sectors; rejects a ≤ 0, solar > 0, wind < 0 and falls back. Feature `hours` is the daily constant.
+* Forecast every 30 min via `weather.get_forecasts` (hourly, falls back to daily); today = measured so far +
+  forecast rest; tomorrow's value is stored as the prediction for that date and compared when the day closes.
+* Options: `forecast_weather_entity` (empty → `smart_cloudy_weather_entity`), `forecast_solar_today`,
+  `forecast_solar_tomorrow`. Intended next step (user agreed to watch accuracy first): let smart heating size the
+  mild-day window from the forecast.
 
 ## Decisions
 

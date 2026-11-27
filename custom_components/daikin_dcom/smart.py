@@ -86,6 +86,9 @@ from .const import (
     H_SPACE_ONOFF,
     H_WEATHER_MODE,
     I_COMPRESSOR,
+    I_FLOW_RATE,
+    I_PUMP,
+    I_RETURN_WATER,
     I_DEFROST,
     I_THREE_WAY_VALVE,
     I_OPERATION_MODE,
@@ -121,11 +124,35 @@ STATUS_PAUSED_NO_DEMAND = "paused_no_demand"
 STATUS_EARLY_START = "heating_early_start"
 STATUS_CLOUDY = "heating_cloudy_override"
 STATUS_COMPRESSOR_REST = "compressor_rest"
+STATUS_PAUSED_COAST = "paused_coasting"
+STATUS_SLAB_CHARGE = "heating_slab_charge"
 ALL_STATUSES = (
     STATUS_DISABLED, STATUS_WAITING, STATUS_COOLING, STATUS_USER_OFF, STATUS_DEFROST,
     STATUS_ACTIVE, STATUS_PAUSED_WARM, STATUS_PAUSED_MILD, STATUS_PAUSED_ROOMS_OFF,
     STATUS_PAUSED_NO_DEMAND, STATUS_EARLY_START, STATUS_CLOUDY, STATUS_COMPRESSOR_REST,
+    STATUS_PAUSED_COAST, STATUS_SLAB_CHARGE,
 )
+# slab temperature from the return water while it circulates with the compressor off
+SLAB_SETTLE = timedelta(minutes=10)  # compressor off this long before the return water counts
+SLAB_ALPHA = 0.3  # smoothing of the slab estimate
+SLAB_VALID = timedelta(hours=3)  # an older estimate is not used for decisions
+SLAB_FULL = 2.5  # degC above the room target: slab counts as charged, no evening charge
+# soft landing: stop a run early when the rooms will reach target from the stored heat
+SOFT_LOOKAHEAD_H = 2.0  # predict the rooms this far ahead from their trend
+SOFT_START_BAND = 0.0  # only once the rooms have reached target
+SOFT_TOLERANCE_DEFAULT = 0.5  # degC: coast if heading this far above target; resume this far below
+SOFT_MAX = timedelta(hours=3)  # ... or after this long
+TREND_WINDOW = timedelta(minutes=60)  # room trend from this much history
+TREND_MIN = timedelta(minutes=20)  # ... at least
+# evening slab charge
+CHARGE_MIN = 30  # minutes
+CHARGE_MAX = 240
+CHARGE_FALLBACK = 90  # minutes when the forecast has not learnt yet (and it is mild or colder)
+CHARGE_OVERHEAT = 1.0  # hold the charge while the rooms are this much above target
+NIGHT_HOURS = 9  # night length when the mild-day window is off
+CHARGE_LWT_RISE = 6  # degC above the room target: minimum setpoint while charging
+RUN_KW_DEFAULT = 5.5  # heat output while running, learnt from the thermal power
+
 STATUS_HOLD = timedelta(minutes=2)  # keep the restored status at most this long after a restart
 
 EARLY_STOP_BAND = 0.3  # degC: an early start ends once the coldest room is this close to target
@@ -170,6 +197,10 @@ class SmartSettings:
     cloud_coverage: float  # % cloud_coverage that counts as cloudy (e.g. a grey "partlycloudy")
     warm_stats_off: bool
     demand_only: bool  # runtime, "Smart heating: heat only on thermostat demand" switch
+    soft_landing: bool  # runtime switch
+    soft_tolerance: float  # runtime number, degC
+    charge_enabled: bool  # runtime switch
+    charge_end: time  # runtime time entity
     cloudy_enabled: bool  # runtime, "Smart heating cloudy-day override" switch
     rest: bool
     rest_cold_out: float  # rest curve: outdoor °C → minutes, flat outside the points
@@ -205,6 +236,10 @@ class SmartSettings:
             cloud_coverage=float(o[CONF_SMART_CLOUD_COVERAGE]),
             warm_stats_off=bool(o[CONF_SMART_WARM_STATS_OFF]),
             demand_only=False,
+            soft_landing=False,
+            soft_tolerance=SOFT_TOLERANCE_DEFAULT,
+            charge_enabled=False,
+            charge_end=time(22, 0),
             cloudy_enabled=True,
             rest=bool(o[CONF_SMART_REST]),
             rest_cold_out=0.0,
@@ -285,6 +320,17 @@ class SmartHeatingController:
         # early start for cold rooms (mild-day pause only)
         self.early_active = False
         self.early_room: str | None = None
+        # slab estimate, soft landing, evening charge
+        self.slab_temp: float | None = None
+        self.slab_measured: datetime | None = None
+        self._comp_off_since: datetime | None = None
+        self._err_hist: list[tuple[datetime, float]] = []
+        self.room_trend: float | None = None  # d(room error)/dh; negative = warming
+        self.coasting = False
+        self._coast_since: datetime | None = None
+        self.run_kw = RUN_KW_DEFAULT
+        self.charge_plan: dict[str, Any] | None = None
+        self.charge_active = False
         self._cold_since: datetime | None = None
         self._early_started: datetime | None = None
         # cloudy-day override of the mild-day window
@@ -346,6 +392,7 @@ class SmartHeatingController:
         self._paused_reason = str(reason) if self.paused_by_us and reason else None
         self._restored = True
         self.room_offset = int(data.get("room_offset", 0))
+        self.run_kw = _float(data.get("run_kw")) or RUN_KW_DEFAULT
         self.stats_off_by_us = {
             str(k): str(v) for k, v in (data.get("thermostats_off") or {}).items()
         }
@@ -386,6 +433,7 @@ class SmartHeatingController:
             "room_offset": self.room_offset,
             "previous_weather_mode": self.previous_weather_mode,
             "thermostats_off": self.stats_off_by_us,
+            "run_kw": self.run_kw,
             "starts": {
                 "day": None if self._starts_day is None else self._starts_day.isoformat(),
                 "all": self.starts_today,
@@ -501,7 +549,7 @@ class SmartHeatingController:
                 _LOGGER.debug("Smart heating: compressor rest dropped, heating paused")
             self.rest_until = None
             return False
-        if stop is not None and c.value("h", H_SPACE_ONOFF) == 1:
+        if stop is not None and c.value("h", H_SPACE_ONOFF) == 1 and not self.charge_active:
             self.rest_until = stop + self.rest_time
             minutes = int(self.rest_time.total_seconds() // 60)
             self._log(
@@ -752,6 +800,197 @@ class SmartHeatingController:
         self.settings.demand_only = enabled
         self._schedule()
 
+    # --- slab estimate, room trend -------------------------------------------
+    def _update_slab(self, now: datetime) -> None:
+        """Slab temperature ~ return water while it circulates with the compressor off.
+
+        With the pump running continuously ([F-0D] = 0) and the compressor off for
+        SLAB_SETTLE, the water leaving the floor has the floor's temperature. Also
+        learns the heat output while the compressor runs (for charge planning).
+        """
+        c = self.coordinator
+        comp = c.value("i", I_COMPRESSOR)
+        dhw = c.value("i", I_THREE_WAY_VALVE) == 1
+        if comp == 1 and not dhw:
+            cop = getattr(c, "cop", None)
+            kw = getattr(cop, "thermal_kw", None) if cop is not None else None
+            if kw is not None and kw > 1.0 and c.value("i", I_DEFROST) != 1:
+                self.run_kw = 0.95 * self.run_kw + 0.05 * kw
+        flowing = (
+            c.value("i", I_PUMP) == 1
+            and (c.value("i", I_FLOW_RATE) or 0) > 0
+            and c.value("h", H_SPACE_ONOFF) == 1
+        )
+        if comp != 0 or dhw or not flowing:
+            self._comp_off_since = None
+            return
+        if self._comp_off_since is None:
+            self._comp_off_since = now
+            return
+        if now - self._comp_off_since < SLAB_SETTLE:
+            return
+        ret = c.temp("i", I_RETURN_WATER)
+        if ret is None:
+            return
+        fresh = self.slab_measured is not None and now - self.slab_measured < timedelta(minutes=30)
+        self.slab_temp = round(ret if not fresh or self.slab_temp is None
+                               else self.slab_temp + SLAB_ALPHA * (ret - self.slab_temp), 1)
+        self.slab_measured = now
+
+    def _slab_now(self, now: datetime) -> float | None:
+        if self.slab_measured is None or now - self.slab_measured > SLAB_VALID:
+            return None
+        return self.slab_temp
+
+    def _update_trend(self, now: datetime) -> None:
+        """Room trend: change of the (aggregated) room error per hour."""
+        if self.room_error is None:
+            self._err_hist.clear()
+            self.room_trend = None
+            return
+        self._err_hist.append((now, self.room_error))
+        self._err_hist = [(t, e) for t, e in self._err_hist if now - t <= TREND_WINDOW]
+        t0, e0 = self._err_hist[0]
+        span = now - t0
+        self.room_trend = (
+            (self.room_error - e0) / (span.total_seconds() / 3600) if span >= TREND_MIN else None
+        )
+
+    def _avg_target(self) -> float:
+        targets = [r["target"] for r in self.rooms if r["available"] and r["on"] and r["target"] is not None]
+        return sum(targets) / len(targets) if targets else self.settings.room_target
+
+    # --- soft landing ----------------------------------------------------------
+    def _update_coasting(self, now: datetime, onoff: int) -> None:
+        """Soft landing: hold the setpoint at 25 °C while the stored heat finishes the job.
+
+        Like a compressor rest, space heating (and the pump) stay on, so the floor
+        keeps evening out and the slab can be measured. Starts when the rooms are
+        within SOFT_START_BAND of target and their trend says they will end up
+        the tolerance above it within SOFT_LOOKAHEAD_H; ends when they fall the
+        tolerance below target, after SOFT_MAX, or for an evening charge. A smaller
+        tolerance keeps the rooms closer to target but means more compressor
+        starts (the unit can't run below ~5 kW).
+        """
+        s = self.settings
+        if (not s.soft_landing or self.room_error is None or onoff != 1
+                or self.paused_by_us or self.charge_active):
+            if self.coasting and s.soft_landing and onoff == 1:
+                self._log("Soft landing over")
+            self.coasting = False
+            return
+        if self.coasting:
+            if self.room_error >= s.soft_tolerance or now - self._coast_since >= SOFT_MAX:
+                self.coasting = False
+                self._log("Soft landing over: rooms cooling, normal setpoint again")
+            return
+        if self.room_trend is not None and self.room_trend < 0:
+            ahead = self.room_error + self.room_trend * SOFT_LOOKAHEAD_H
+            if self.room_error <= SOFT_START_BAND and ahead <= -s.soft_tolerance:
+                self.coasting = True
+                self._coast_since = now
+                self._log(
+                    f"Soft landing: rooms near target and rising {-self.room_trend:.1f} °C/h; "
+                    "setpoint held at 25 °C, the floor finishes the job"
+                )
+
+    # --- evening slab charge ----------------------------------------------------
+    def set_soft_landing(self, enabled: bool) -> None:
+        self.settings.soft_landing = enabled
+        if not enabled:
+            self.coasting = False
+        self._schedule()
+
+    def set_soft_tolerance(self, value: float) -> None:
+        self.settings.soft_tolerance = float(value)
+        self._schedule()
+
+    def set_charge(self, enabled: bool | None = None, end: time | None = None) -> None:
+        if enabled is not None:
+            self.settings.charge_enabled = enabled
+        if end is not None:
+            self.settings.charge_end = end
+        if not self.charge_active:
+            self.charge_plan = None  # re-plan with the new settings
+        self._schedule()
+
+    def _plan_charge(self, now: datetime) -> None:
+        """Plan today's evening charge: night heat need -> minutes before the end time.
+
+        Re-planned on every evaluation until the charge starts (the forecast keeps
+        improving), then frozen for the day.
+        """
+        s = self.settings
+        if not s.charge_enabled:
+            self.charge_plan = None
+            return
+        local = dt_util.as_local(now)
+        end = local.replace(hour=s.charge_end.hour, minute=s.charge_end.minute, second=0, microsecond=0)
+        plan = self.charge_plan
+        if plan and plan["date"] == local.date().isoformat() and (
+            self.charge_active or plan.get("stopped") or local >= dt_util.parse_datetime(plan["start"])
+        ):
+            return  # started, stopped or over: keep it for today
+        if local >= end:
+            if not plan or plan["date"] != local.date().isoformat():
+                self.charge_plan = {"date": local.date().isoformat(), "minutes": 0,
+                                    "start": end.isoformat(), "end": end.isoformat(),
+                                    "reason": "end time passed"}
+            return
+        if s.window_enabled:
+            nxt = end.replace(hour=s.window_start.hour, minute=s.window_start.minute)
+            if nxt <= end:
+                nxt += timedelta(days=1)
+        else:
+            nxt = end + timedelta(hours=NIGHT_HOURS)
+        fc = getattr(self.coordinator, "forecast", None)
+        need = fc.need_kwh(end, nxt) if fc is not None else None
+        slab = self._slab_now(now)
+        if slab is not None and slab >= self._avg_target() + SLAB_FULL:
+            minutes, why = 0, f"floor already warm ({slab:.1f} °C)"
+        elif need is not None:
+            minutes = need / max(self.run_kw, 1.0) * 60
+            why = f"night need {need:.0f} kWh until {nxt:%H:%M}"
+            minutes = 0 if minutes < CHARGE_MIN / 2 else min(CHARGE_MAX, max(CHARGE_MIN, minutes))
+        elif self.outdoor_avg is not None and self.outdoor_avg < s.off_temp:
+            minutes, why = CHARGE_FALLBACK, "forecast still learning: fixed charge"
+        else:
+            minutes, why = 0, "warm"
+        start = end - timedelta(minutes=round(minutes))
+        self.charge_plan = {
+            "date": local.date().isoformat(), "minutes": round(minutes),
+            "start": start.isoformat(), "end": end.isoformat(),
+            "need_kwh": None if need is None else round(need, 1), "reason": why,
+        }
+
+    def _charge(self, now: datetime, allowed: bool, reason: str | None) -> tuple[bool, str | None]:
+        """Run the planned evening charge: lifts the mild-day, coasting and no-demand
+        pauses (not the warm cut-off or all thermostats off); held while the rooms
+        are CHARGE_OVERHEAT above target, continued when they cool."""
+        plan = self.charge_plan
+        local = dt_util.as_local(now)
+        active = bool(
+            plan and plan["minutes"] > 0 and not plan.get("stopped")
+            and dt_util.parse_datetime(plan["start"]) <= local < dt_util.parse_datetime(plan["end"])
+            and reason not in ("warm", "rooms_off")
+        )
+        if active and self.room_error is not None and self.room_error <= -CHARGE_OVERHEAT:
+            active = False  # rooms too warm right now: hold, continue when they cool
+            plan["held"] = "rooms more than 1 °C above target"
+        elif active:
+            plan.pop("held", None)
+        if active and not self.charge_active:
+            self._log(
+                f"Evening slab charge: heating until {plan['end'][11:16]} "
+                f"({plan['minutes']} min, {plan['reason']})"
+            )
+            self.coasting = False
+        elif self.charge_active and not active:
+            self._log("Evening slab charge held: rooms more than 1 °C above target"
+                      if plan and plan.get("held") else "Evening slab charge finished")
+        self.charge_active = active
+        return (True, None) if active else (allowed, reason)
+
     async def _sync_thermostats(self) -> None:
         """Warm pause: switch the selected thermostats off; heating back on: restore them."""
         if self.paused_by_us and self._paused_reason == "warm":
@@ -875,6 +1114,7 @@ class SmartHeatingController:
             self.status = STATUS_DISABLED
             return
         self._update_outdoor(now)
+        self._update_slab(now)
 
         op = c.value("h", H_OPERATION_MODE)
         onoff = c.value("h", H_SPACE_ONOFF)
@@ -913,19 +1153,26 @@ class SmartHeatingController:
         self.calling_rooms = [
             r["entity"] for r in self.rooms if r["thermostat"] and r["available"] and r.get("calling")
         ]
+        self._update_trend(now)
         self._update_room_offset(now)
         self.curve_value = curve_lwt(s, self.outdoor_avg)
         target = round(self.curve_value + self.room_offset)
+        if self.charge_active:
+            # the curve at mild temperatures (minus room correction) is too close to the
+            # floor temperature to make the unit run: charge at room target + CHARGE_LWT_RISE
+            target = max(target, round(self._avg_target() + CHARGE_LWT_RISE))
         target = int(max(LWT_FLOOR, min(s.max_lwt, target)))
         self.target_lwt = target
         resting = self._update_rest(now)
-        if resting:
+        self._update_coasting(now, onoff)
+        if resting or self.coasting:
             # keep space heating (and the pump) on, but below the water temperature
             target = LWT_FLOOR
         current = c.value("h", H_LWT_HEAT_SP)
         paused = self.paused_by_us and c.value("h", H_SPACE_ONOFF) == 0
         due = not paused and (
             resting
+            or self.coasting
             or self._last_setpoint_write is None
             or now - self._last_setpoint_write >= SETPOINT_MIN_INTERVAL
             or current is None
@@ -944,6 +1191,8 @@ class SmartHeatingController:
         allowed = self._cloudy_override(now, allowed, reason)
         allowed = self._early_start(now, allowed, reason)
         allowed, reason = self._demand_gate(now, allowed, reason)
+        self._plan_charge(now)
+        allowed, reason = self._charge(now, allowed, reason)
         since = (
             None if self._last_onoff_change is None else now - self._last_onoff_change
         )
@@ -980,6 +1229,10 @@ class SmartHeatingController:
             }.get(self._paused_reason, STATUS_PAUSED_MILD)
         elif self.rest_until is not None:
             self.status = STATUS_COMPRESSOR_REST
+        elif self.charge_active:
+            self.status = STATUS_SLAB_CHARGE
+        elif self.coasting:
+            self.status = STATUS_PAUSED_COAST  # heating on, setpoint held at 25 °C
         elif self.cloudy_active:
             self.status = STATUS_CLOUDY
         elif self.early_active:
@@ -1101,6 +1354,15 @@ class SmartHeatingController:
             "cloudy": self.cloudy,
             "cloud_coverage_threshold": s.cloud_coverage,
             "rooms_calling_for_heat": self.calling_rooms,
+            "slab_temperature": self.slab_temp,
+            "slab_measured": None if self.slab_measured is None else dt_util.as_local(self.slab_measured).strftime("%H:%M"),
+            "room_trend_per_hour": None if self.room_trend is None else round(-self.room_trend, 2),
+            "soft_landing": s.soft_landing,
+            "coasting": self.coasting,
+            "soft_landing_tolerance": s.soft_tolerance,
+            "slab_charge": s.charge_enabled,
+            "slab_charge_plan": self.charge_plan,
+            "heat_output_while_running_kw": round(self.run_kw, 1),
             "early_start": s.early_start,
             "early_start_room": self.early_room,
             "cold_room_since": None

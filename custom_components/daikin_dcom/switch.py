@@ -25,6 +25,10 @@ async def async_setup_entry(
             DcomSmartWindowSwitch(coordinator),
             DcomSmartCloudySwitch(coordinator),
             DcomSmartDemandSwitch(coordinator),
+            DcomSmartToggle(coordinator, "smart_soft_landing", "Smart heating soft landing",
+                            "mdi:airplane-landing", "soft_landing", "set_soft_landing"),
+            DcomSmartToggle(coordinator, "smart_slab_charge", "Smart heating evening slab charge",
+                            "mdi:battery-charging-high", "charge_enabled", "set_charge"),
         ]
     )
 
@@ -177,4 +181,35 @@ class DcomSmartDemandSwitch(DcomEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._smart.set_demand_only(False)
+        self.async_write_ha_state()
+
+
+class DcomSmartToggle(DcomEntity, SwitchEntity, RestoreEntity):
+    """A smart heating on/off setting kept in SmartSettings (restored after a restart)."""
+
+    def __init__(self, coordinator: DcomCoordinator, key: str, name: str, icon: str,
+                 field: str, setter: str) -> None:
+        super().__init__(coordinator, key)
+        self._smart = coordinator.smart
+        self._attr_name = name
+        self._attr_icon = icon
+        self._field = field
+        self._setter = getattr(coordinator.smart, setter)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state in ("on", "off"):
+            self._setter(last.state == "on")
+
+    @property
+    def is_on(self) -> bool:
+        return bool(getattr(self._smart.settings, self._field))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._setter(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._setter(False)
         self.async_write_ha_state()

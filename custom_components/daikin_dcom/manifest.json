@@ -1,17 +1,19 @@
 {
   "domain": "daikin_dcom",
   "name": "Daikin Altherma 3 (DCOM-LT/MB Modbus TCP)",
-  "codeowners": [],
+  "after_dependencies": [
+    "logbook"
+  ],
+  "codeowners": [
+    "@cocooma"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/your-name/ha-daikin-dcom",
-  "issue_tracker": "https://github.com/your-name/ha-daikin-dcom/issues",
+  "documentation": "https://github.com/cocooma/daikin_dcom",
   "integration_type": "device",
   "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/cocooma/daikin_dcom/issues",
   "requirements": [
     "pymodbus>=3.6.9"
   ],
-  "version": "1.0.0",
-  "after_dependencies": [
-    "logbook"
-  ]
+  "version": "1.1.0"
 }

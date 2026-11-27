@@ -158,6 +158,17 @@ There is no Home Assistant test setup in the repo. Changes have been checked by:
 
 Nothing has been verified on real hardware by these checks; say so when reporting.
 
+## HACS / packaging
+
+* Repo layout follows HACS: `custom_components/daikin_dcom/`, `hacs.json` at the root (name, minimum HA
+  2024.4.0, render_readme), brand images in `custom_components/daikin_dcom/brand/` (`icon.png` 256 px,
+  `icon@2x.png` 512 px; no logo, HA falls back to the icon; shown from HA 2026.3).
+* `manifest.json`: `domain`, `name` first, then keys alphabetical (hassfest); codeowners `@cocooma`;
+  documentation / issue_tracker point at the GitHub repo. Bump `version` with each release and tag the release
+  `v<version>` (HACS shows release tags; the manifest version is what it reports as installed).
+* `.github/workflows/validate.yml` runs the HACS action and hassfest on push, PRs and weekly.
+* HACS needs the repo to be public and to have a description and topics on GitHub.
+
 ## Working conventions
 
 * One feature per branch, merged via pull request on GitHub (`cocooma/daikin_dcom`); don't commit to `main`.
